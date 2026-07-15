@@ -1,0 +1,86 @@
+# pdf-encrypt-lib
+
+Password protection for [pdf-lib](https://github.com/Hopding/pdf-lib) - which has no built-in encryption support ([long-standing open feature request](https://github.com/Hopding/pdf-lib/issues/23)).
+
+Implements the PDF Standard Security Handler, Version 5 / Revision 6 (AES-256), as specified in ISO 32000-2, directly on top of pdf-lib's object model. Works in both Node.js (18.19+/19+, for `globalThis.crypto`) and modern browsers.
+
+Revision 6 was chosen over the older Revision 4 (AES-128) because R4's key derivation requires RC4 even though the content itself is AES-encrypted - R6 needs only AES-CBC and SHA-256/384/512, both already provided by [node-forge](https://github.com/digitalbazaar/forge).
+
+## Install
+
+```
+npm install pdf-encrypt-lib pdf-lib node-forge
+```
+
+`pdf-lib` and `node-forge` are peer dependencies - install them alongside this package.
+
+## Usage
+
+```js
+import { PDFDocument } from 'pdf-lib';
+import { encryptPdf, decryptPdf, changePdfPassword } from 'pdf-encrypt-lib';
+
+const doc = await PDFDocument.create();
+// ... build your document ...
+const plainBytes = await doc.save();
+
+// Protect
+const encryptedBytes = await encryptPdf(plainBytes, 'my-password');
+
+// Open (throws Error('WRONG_PASSWORD') or Error('NOT_ENCRYPTED'))
+const { bytes: decryptedBytes, owner } = await decryptPdf(encryptedBytes, 'my-password');
+
+// Change password (decrypt + re-encrypt)
+const rotatedBytes = await changePdfPassword(encryptedBytes, 'my-password', 'new-password');
+
+// Remove protection entirely
+const { bytes: unprotectedBytes } = await decryptPdf(encryptedBytes, 'my-password');
+```
+
+### Separate user and owner passwords
+
+The PDF spec distinguishes a *user* password (needed to open/view the file) from an *owner* password (grants full permissions regardless of the `permissions` restrictions below). By default both are the same value; pass `ownerPassword` to set a master password separate from the viewing password:
+
+```js
+await encryptPdf(bytes, 'view-only-password', { ownerPassword: 'master-password' });
+```
+
+`decryptPdf()` accepts either password and returns `{ bytes, owner }`, where `owner` tells you which one was used.
+
+### Permissions
+
+```js
+import { encryptPdf, DEFAULT_PERMISSIONS } from 'pdf-encrypt-lib';
+
+await encryptPdf(bytes, 'password', { permissions: DEFAULT_PERMISSIONS });
+```
+
+`permissions` is the raw 32-bit `/P` permission bitmask from ISO 32000-1 Table 22 (bit 3 = print, bit 4 = modify, bit 5 = copy, bit 6 = annotate, bit 9 = fill forms, bit 10 = extract for accessibility, bit 11 = assemble document, bit 12 = high-res print; reserved bits 7, 8 and 13-32 must stay `1`). `DEFAULT_PERMISSIONS` grants printing and denies modify/copy/annotate/assemble.
+
+## API
+
+- `encryptPdf(bytes, password, options?) -> Promise<Uint8Array>`
+- `decryptPdf(bytes, password) -> Promise<{ bytes: Uint8Array, owner: boolean }>`
+- `changePdfPassword(bytes, oldPassword, newPassword) -> Promise<Uint8Array>`
+- `DEFAULT_PERMISSIONS` - the permission bitmask used when `options.permissions` isn't given
+
+`decryptPdf` throws `Error('NOT_ENCRYPTED')` if the input has no `/Encrypt` dictionary, and `Error('WRONG_PASSWORD')` if authentication fails.
+
+## How it works
+
+- Every indirect string and raw stream in the document is walked and encrypted/decrypted individually with AES-256-CBC, using a random 16-byte IV prepended to each ciphertext (`walkAndTransform` in `src/index.js`).
+- The file encryption key is a random 32 bytes, wrapped separately for the user and owner password via ISO 32000-2 Algorithm 2.B (a "hardened" hash: SHA-256, then 64+ rounds of AES-128-CBC re-encryption alternating between SHA-256/384/512 depending on a checksum of each round's output).
+- Unlike Revision 4, V5/R6 uses the file encryption key directly for every object - no per-object key derivation.
+- Two pdf-lib quirks are worked around: `PDFRawStream` is not a `PDFDict` (separate class, so its `.dict` needs walking separately from its `.contents`), and `PDFDocument`'s constructor unconditionally overwrites `/Producer`/`/ModDate` unless `updateMetadata: false` is passed when loading an already-encrypted file for decryption.
+
+## Testing
+
+```
+npm test
+```
+
+The test suite ([`test/roundtrip.test.js`](test/roundtrip.test.js)) round-trips encrypt/decrypt/change-password through this library's own code. During development this was additionally cross-validated against [`pypdf`](https://pypdf.readthedocs.io/) (encrypting with this library and reading with pypdf, and vice versa) to confirm spec compliance against an independent implementation, not just internal self-consistency.
+
+## License
+
+MIT
