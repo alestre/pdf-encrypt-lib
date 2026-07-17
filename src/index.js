@@ -8,6 +8,7 @@
 // both provided by node-forge.
 
 import forge from 'node-forge';
+import saslprep from 'saslprep';
 import { PDFDocument, PDFName, PDFHexString, PDFNumber, PDFBool, PDFDict, PDFStream, PDFRawStream, PDFString, PDFArray } from 'pdf-lib';
 
 function randomBytes(n) {
@@ -38,6 +39,27 @@ function bytesToHex(bin) {
         hex += h.length === 1 ? '0' + h : h;
     }
     return hex;
+}
+
+// ISO 32000-2 §7.6.4.3.3 - SASLprep (RFC 4013) the password before UTF-8 encoding
+// it, then truncate the resulting UTF-8 bytes to 127 (forge.util.encodeUtf8
+// returns a JS binary string, one char per byte, so substring() truncates bytes,
+// not code points). saslprep() throws on prohibited/unassigned characters or
+// invalid bidi mixing (RFC 4013 §2.3-2.4); surfaced as a typed error to match
+// the rest of this file's error-handling convention.
+function preparePassword(password) {
+    let prepped;
+    try {
+        // allowUnassigned: RFC 3454's "unassigned code points" table is frozen at
+        // Unicode 3.2 (2002) - without this, any modern character absent from that
+        // table (most emoji, many newer scripts) is rejected as "unassigned" even
+        // though it's perfectly valid Unicode today. Mapping, NFKC normalization,
+        // the prohibited-character list, and the bidi check all still apply.
+        prepped = saslprep(password, { allowUnassigned: true });
+    } catch (err) {
+        throw new Error(`INVALID_PASSWORD: ${err.message}`);
+    }
+    return forge.util.encodeUtf8(prepped).substring(0, 127);
 }
 
 // PDF 1.5+ cross-reference streams almost always come with compressed object
@@ -145,7 +167,7 @@ function computeOandOE(ownerPwdBytes, U48, fileKey32) {
 }
 
 function authenticatePdfPassword(password, U48, O48, UE32, OE32) {
-    const pwdBytes = forge.util.encodeUtf8(password);
+    const pwdBytes = preparePassword(password);
     const uVal = U48.substring(0, 32), uVSalt = U48.substring(32, 40), uKSalt = U48.substring(40, 48);
     if (hash2B(pwdBytes, uVSalt, null) === uVal) {
         const ik = hash2B(pwdBytes, uKSalt, null);
@@ -223,8 +245,8 @@ export async function encryptPdf(bytes, password, options = {}) {
     // objects in the graph before we enumerate and encrypt everything below.
     const doc = await PDFDocument.load(bytes);
     const fileKey = randomBytes(32);
-    const pwdBytes = forge.util.encodeUtf8(password);
-    const ownerPwdBytes = forge.util.encodeUtf8(options.ownerPassword ?? password);
+    const pwdBytes = preparePassword(password);
+    const ownerPwdBytes = preparePassword(options.ownerPassword ?? password);
     const permissions = options.permissions ?? DEFAULT_PERMISSIONS;
 
     walkAndTransform(doc, (raw) => encryptObjectAESV3(fileKey, raw));
@@ -264,9 +286,9 @@ export async function encryptPdf(bytes, password, options = {}) {
  * Remove password protection from an encrypted PDF.
  * @param {Uint8Array|ArrayBuffer} bytes - encrypted PDF bytes
  * @param {string} password - either the user or the owner password
- * @returns {Promise<{ bytes: Uint8Array, owner: boolean }>}
+ * @returns {Promise<{ bytes: Uint8Array, owner: boolean, permissions: number }>}
  * @throws {Error} with message 'NOT_ENCRYPTED', 'WRONG_PASSWORD', 'CORRUPT_PDF',
- *   or 'XREF_STREAM_UNSUPPORTED'
+ *   'XREF_STREAM_UNSUPPORTED', or 'INVALID_PASSWORD'
  */
 export async function decryptPdf(bytes, password) {
     // updateMetadata:false - otherwise pdf-lib's constructor unconditionally
@@ -290,13 +312,14 @@ export async function decryptPdf(bytes, password) {
         );
     }
 
-    let U48, O48, UE32, OE32;
+    let U48, O48, UE32, OE32, P;
     try {
         const encDict = doc.context.lookup(encRef);
         U48 = uint8ToBinaryString(encDict.lookup(PDFName.of('U')).asBytes());
         O48 = uint8ToBinaryString(encDict.lookup(PDFName.of('O')).asBytes());
         UE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('UE')).asBytes());
         OE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('OE')).asBytes());
+        P = encDict.lookup(PDFName.of('P')).asNumber();
     } catch {
         throw new Error('CORRUPT_PDF');
     }
@@ -310,7 +333,7 @@ export async function decryptPdf(bytes, password) {
     });
 
     delete doc.context.trailerInfo.Encrypt;
-    return { bytes: await doc.save({ useObjectStreams: false }), owner: auth.owner };
+    return { bytes: await doc.save({ useObjectStreams: false }), owner: auth.owner, permissions: P };
 }
 
 /**
@@ -322,7 +345,7 @@ export async function decryptPdf(bytes, password) {
  */
 export async function changePdfPassword(bytes, oldPassword, newPassword) {
     const plain = await decryptPdf(bytes, oldPassword);
-    return encryptPdf(plain.bytes, newPassword);
+    return encryptPdf(plain.bytes, newPassword, { permissions: plain.permissions });
 }
 
 export { DEFAULT_PERMISSIONS };
