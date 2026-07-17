@@ -112,7 +112,7 @@ function aesCbcPkcs7Decrypt(key, iv, data) {
     return d.output.getBytes();
 }
 
-// ISO 32000-2 Algorithm 2.B - hardened password hash (revision 6).
+// ISO 32000-2 §7.6.4.3.4, Algorithm 2.B - hardened password hash (revision 6).
 function hash2B(passwordBytes, saltBytes, userKeyBytes) {
     userKeyBytes = userKeyBytes || '';
     let K = sha256(passwordBytes + saltBytes + userKeyBytes);
@@ -145,11 +145,13 @@ function readLE32(s) {
 // Reserved bits (7, 8, 13-32) forced to 1 as required by the spec.
 const DEFAULT_PERMISSIONS = ((4 | 2048 | 256 | 512) | (0xFFFFF000 | 0xC0)) >>> 0;
 
+// ISO 32000-2 §7.6.4.4.7, Algorithm 13 - compute the encrypted Perms value.
 function computePerms(P, encryptMetadata, fileKey32) {
     const buf = le32(P) + '\xff\xff\xff\xff' + (encryptMetadata ? 'T' : 'F') + 'adb' + randomBytes(4);
     return aesCbcNoPad(fileKey32, '\x00'.repeat(16), buf, false);
 }
 
+// ISO 32000-2 §7.6.4.4.4, Algorithm 8 - compute the U and UE values.
 function computeUandUE(userPwdBytes, fileKey32) {
     const validationSalt = randomBytes(8), keySalt = randomBytes(8);
     const hash = hash2B(userPwdBytes, validationSalt, null);
@@ -160,6 +162,7 @@ function computeUandUE(userPwdBytes, fileKey32) {
     };
 }
 
+// ISO 32000-2 §7.6.4.4.5, Algorithm 9 - compute the O and OE values.
 function computeOandOE(ownerPwdBytes, U48, fileKey32) {
     const validationSalt = randomBytes(8), keySalt = randomBytes(8);
     const hash = hash2B(ownerPwdBytes, validationSalt, U48);
@@ -170,6 +173,7 @@ function computeOandOE(ownerPwdBytes, U48, fileKey32) {
     };
 }
 
+// ISO 32000-2 §7.6.4.4.10 / §7.6.4.4.11, Algorithms 6 and 7 - authenticate the user/owner password.
 function authenticatePdfPassword(password, U48, O48, UE32, OE32) {
     const pwdBytes = preparePassword(password);
     const uVal = U48.substring(0, 32), uVSalt = U48.substring(32, 40), uKSalt = U48.substring(40, 48);
@@ -185,6 +189,7 @@ function authenticatePdfPassword(password, U48, O48, UE32, OE32) {
     return null;
 }
 
+// ISO 32000-2 §7.6.5.3, Algorithm 1.A - AES-256 (AESV3) object encryption/decryption.
 function encryptObjectAESV3(fileKey32, plaintext) {
     const iv = randomBytes(16);
     return iv + aesCbcPkcs7Encrypt(fileKey32, iv, plaintext);
