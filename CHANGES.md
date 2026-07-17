@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2026-07-17
+
+### Fixed
+
+- `decryptObjectAESV3` now throws `Error('CORRUPT_PDF')` instead of silently
+  returning an empty string for a per-object ciphertext of 16 bytes or fewer.
+  Nothing legitimate should ever be that short (minimum valid encrypted output
+  is 32 bytes), so this only affects corrupted or adversarial input, which
+  previously decrypted to silent empty content instead of a diagnostic error.
+
+### Tests
+
+- Corrupted per-object ciphertext (shrunk below the minimum valid length)
+  asserts `CORRUPT_PDF` instead of silently succeeding with empty content.
+
 ## [0.1.3] - 2026-07-17
 
 ### Fixed
