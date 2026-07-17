@@ -4,6 +4,8 @@ Password protection for [pdf-lib](https://github.com/Hopding/pdf-lib), which has
 
 Built for [PDF File Manager](https://ascend-digital.net/tools/pdffile/) by [Ascend Digital](https://ascend-digital.net).
 
+[Codeberg](https://codeberg.org/alestre/pdf-encrypt-lib) · [GitHub](https://github.com/alestre/pdf-encrypt-lib)
+
 Implements the PDF Standard Security Handler, Version 5 / Revision 6 (AES-256), as specified in ISO 32000-2, directly on top of pdf-lib's object model. Works in both Node.js (18.19+/19+, for `globalThis.crypto`) and modern browsers.
 
 Revision 6 was chosen over the older Revision 4 (AES-128) because R4's key derivation requires RC4 even though the content itself is AES-encrypted. R6 needs only AES-CBC and SHA-256/384/512, both already provided by [node-forge](https://github.com/digitalbazaar/forge).
