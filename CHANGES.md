@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.7] (2026-07-17)
+
+### Changed
+
+- `changePdfPassword` now accepts an optional fourth argument `options`
+  (same shape as `encryptPdf`'s `options`). Pass `options.ownerPassword` to
+  set a distinct owner password on the re-encrypted document, preserving a
+  two-password model across a rotation. Without it the behaviour is unchanged:
+  both user and owner roles use `newPassword`. Original document permissions
+  are still preserved unless explicitly overridden via `options.permissions`.
+
+### Tests
+
+- Rotating a two-password document with `options.ownerPassword` asserts that
+  the old owner password is rejected, the new user password authenticates as
+  user, and the new owner password authenticates as owner.
+
 ## [0.1.6] (2026-07-17)
 
 ### Fixed
