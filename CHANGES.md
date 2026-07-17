@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2026-07-17
+
+### Fixed
+
+- `changePdfPassword` now preserves the original document's `permissions`
+  across a password rotation instead of silently resetting them to
+  `DEFAULT_PERMISSIONS`. `decryptPdf`'s return value gained a `permissions`
+  field carrying the decrypted `/P` value.
+- Passwords are now processed with SASLprep (RFC 4013, ISO 32000-2 §7.6.4.3.3)
+  before UTF-8 encoding, so Unicode-equivalent but differently-composed
+  passwords (e.g. NFC vs NFD) are treated as the same password, matching
+  spec-compliant readers. Unassigned-code-point rejection is relaxed
+  (`allowUnassigned: true`) since RFC 3454's table is frozen at Unicode 3.2
+  and would otherwise reject most modern characters, including emoji.
+  Malformed passwords (prohibited characters, invalid bidi mixing) now throw
+  `Error('INVALID_PASSWORD: ...')` instead of silently hashing them as-is.
+- The UTF-8-encoded password is now truncated to 127 bytes before hashing,
+  matching the V5/R6 key-computation algorithm; previously a longer password
+  derived a different key than a spec-compliant reader.
+
+### Tests
+
+- Password rotation preserves custom `permissions`.
+- NFC vs NFD forms of the same password both authenticate the same file.
+- Two passwords sharing the same first 127 UTF-8 bytes both authenticate the
+  same file.
+
 ## [0.1.2] - 2026-07-17
 
 ### Fixed

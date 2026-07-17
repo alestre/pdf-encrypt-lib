@@ -94,3 +94,35 @@ test('decryptPdf throws CORRUPT_PDF on unparseable input', async () => {
     const garbage = new Uint8Array(128).fill(0x42);
     await assert.rejects(() => decryptPdf(garbage, 'any'), /CORRUPT_PDF/);
 });
+
+test('changePdfPassword preserves custom permissions instead of resetting to DEFAULT_PERMISSIONS', async () => {
+    const plain = await makeTestPdf('permissions rotate test');
+    const customPermissions = (4 | 0xFFFFF000 | 0xC0) >>> 0; // print only, reserved bits set
+    const encrypted = await encryptPdf(plain, 'old-pass', { permissions: customPermissions });
+    const rotated = await changePdfPassword(encrypted, 'old-pass', 'new-pass');
+
+    const result = await decryptPdf(rotated, 'new-pass');
+    assert.equal(result.permissions, customPermissions | 0);
+});
+
+test('SASLprep-normalizes the password, so NFC and NFD forms of the same password are equivalent', async () => {
+    const plain = await makeTestPdf('saslprep test');
+    const nfc = 'café'.normalize('NFC');
+    const nfd = 'café'.normalize('NFD');
+    assert.notEqual(nfc, nfd);
+
+    const encrypted = await encryptPdf(plain, nfc);
+    const result = await decryptPdf(encrypted, nfd);
+    assert.match(await extractFirstPageText(result.bytes), /saslprep test/);
+});
+
+test('only the first 127 UTF-8 bytes of a password are significant', async () => {
+    const plain = await makeTestPdf('long password test');
+    const base = 'x'.repeat(127);
+    const longPwd = base + 'A'.repeat(50);
+    const alsoValidPwd = base + 'B'.repeat(50);
+
+    const encrypted = await encryptPdf(plain, longPwd);
+    const result = await decryptPdf(encrypted, alsoValidPwd);
+    assert.match(await extractFirstPageText(result.bytes), /long password test/);
+});
