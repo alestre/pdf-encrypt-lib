@@ -5,7 +5,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { encryptPdf } from '../src/index.js';
+import { readFile } from 'node:fs/promises';
+import { encryptPdf, decryptPdf } from '../src/index.js';
 
 // Cross-validates our AES-256 output against independent PDF readers (qpdf,
 // poppler) instead of just round-tripping through our own encrypt/decrypt -
@@ -75,6 +76,23 @@ test(
         assert.throws(() =>
             execFileSync('qpdf', ['--password=wrong password', '--decrypt', encPath, outPath], { stdio: 'ignore' })
         );
+    })
+);
+
+test(
+    'qpdf-encrypted PDF is decrypted correctly by our library',
+    { skip: qpdfAvailable ? false : 'qpdf not found on this machine' },
+    () => withTempEncryptedPdf(async (_encPath, dir) => {
+        const plainPath = path.join(dir, 'plain.pdf');
+        const qpdfEncPath = path.join(dir, 'qpdf-enc.pdf');
+        const plainBytes = await makeTestPdf(CONTENT);
+        await writeFile(plainPath, plainBytes);
+        // --object-streams=disable forces a traditional xref table; pdf-lib cannot
+        // load encrypted PDFs that use xref streams (a pdf-lib parser limitation).
+        execFileSync('qpdf', ['--object-streams=disable', '--encrypt', PASSWORD, PASSWORD, '256', '--', plainPath, qpdfEncPath]);
+        const encrypted = await readFile(qpdfEncPath);
+        const result = await decryptPdf(encrypted, PASSWORD);
+        assert.ok(result.bytes.length > 0);
     })
 );
 

@@ -249,14 +249,25 @@ export async function decryptPdf(bytes, password) {
     // updateMetadata:false - otherwise pdf-lib's constructor unconditionally
     // overwrites /Producer and /ModDate with plaintext values before we get
     // a chance to decrypt the (still-encrypted) originals.
-    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
-    const encRef = doc.context.trailerInfo.Encrypt;
+    let doc, encRef;
+    try {
+        doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+        encRef = doc.context.trailerInfo.Encrypt;
+    } catch {
+        throw new Error('CORRUPT_PDF');
+    }
     if (!encRef) throw new Error('NOT_ENCRYPTED');
-    const encDict = doc.context.lookup(encRef);
-    const U48 = uint8ToBinaryString(encDict.lookup(PDFName.of('U')).asBytes());
-    const O48 = uint8ToBinaryString(encDict.lookup(PDFName.of('O')).asBytes());
-    const UE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('UE')).asBytes());
-    const OE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('OE')).asBytes());
+
+    let U48, O48, UE32, OE32;
+    try {
+        const encDict = doc.context.lookup(encRef);
+        U48 = uint8ToBinaryString(encDict.lookup(PDFName.of('U')).asBytes());
+        O48 = uint8ToBinaryString(encDict.lookup(PDFName.of('O')).asBytes());
+        UE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('UE')).asBytes());
+        OE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('OE')).asBytes());
+    } catch {
+        throw new Error('CORRUPT_PDF');
+    }
 
     const auth = authenticatePdfPassword(password, U48, O48, UE32, OE32);
     if (!auth) throw new Error('WRONG_PASSWORD');
