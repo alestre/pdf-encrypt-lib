@@ -258,6 +258,9 @@ export async function encryptPdf(bytes, password, options = {}) {
     const ownerPwdBytes = preparePassword(options.ownerPassword ?? password);
     const permissions = options.permissions ?? DEFAULT_PERMISSIONS;
 
+    // Invariant: encryptDict below must be built and registered *after* this walk -
+    // walkAndTransform encrypts every indirect object it finds, and encryptDict
+    // (O/U/OE/UE) must never be one of them.
     walkAndTransform(doc, (raw) => encryptObjectAESV3(fileKey, raw));
 
     const uPair = computeUandUE(pwdBytes, fileKey);
@@ -285,6 +288,11 @@ export async function encryptPdf(bytes, password, options = {}) {
     });
     doc.context.trailerInfo.Encrypt = doc.context.register(encryptDict);
 
+    // Invariant: ID must stay a direct object on trailerInfo, never
+    // doc.context.register(...)'d - enumerateIndirectObjects (used by this
+    // function's walk above and by decryptPdf's own walk later) only sees
+    // registered indirect objects. An indirect ID would get silently
+    // "decrypted" (corrupted) by decryptPdf on the round trip.
     const idHex = PDFHexString.of(bytesToHex(randomBytes(16)));
     doc.context.trailerInfo.ID = doc.context.obj([idHex, idHex]);
 
