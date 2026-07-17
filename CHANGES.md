@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-07-17
+
+### Fixed
+
+- `decryptPdf` now throws `Error('XREF_STREAM_UNSUPPORTED: ...')` with guidance to
+  pre-process via `qpdf --object-streams=disable` for PDFs that use PDF 1.5+
+  cross-reference/object streams (the default output of qpdf, Acrobat, and most
+  modern generators). Previously this either surfaced a misleading `CORRUPT_PDF`
+  or crashed deep inside pdf-lib with `Expected instance of PDFDict, but got
+  instance of undefined`, because pdf-lib decompresses object streams while
+  parsing/accessing the document, before this library can supply the file key.
+
 ## [0.1.1] - 2026-07-17
 
 ### Fixed

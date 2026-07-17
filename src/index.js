@@ -40,6 +40,28 @@ function bytesToHex(bin) {
     return hex;
 }
 
+// PDF 1.5+ cross-reference streams almost always come with compressed object
+// streams, which pdf-lib decompresses while parsing/accessing the document -
+// before this library can supply the file key. Detect the structural feature
+// up front instead of letting pdf-lib corrupt its object graph on encrypted,
+// still-undecrypted object-stream bytes.
+function usesXRefStream(bytes) {
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const s = uint8ToBinaryString(u8);
+    const last = s.lastIndexOf('startxref');
+    if (last === -1) return false; // ambiguous - let normal load/CORRUPT_PDF handling take over
+    const m = /startxref\s+(\d+)/.exec(s.slice(last));
+    if (!m) return false;
+    const offset = Number(m[1]);
+    if (offset < 0 || offset >= s.length) return false;
+    const atOffset = s.slice(offset, offset + 4);
+    if (!/^xref\b/.test(atOffset)) return true; // no classic keyword at the xref offset -> stream-based
+    // classic table found, but a hybrid file can still carry object streams via /XRefStm
+    const trailerIdx = s.indexOf('trailer', offset);
+    const trailerBlock = trailerIdx === -1 ? '' : s.slice(trailerIdx, last);
+    return /\/XRefStm\b/.test(trailerBlock);
+}
+
 function sha256(s) { const m = forge.md.sha256.create(); m.update(s); return m.digest().getBytes(); }
 function sha384(s) { const m = forge.md.sha384.create(); m.update(s); return m.digest().getBytes(); }
 function sha512(s) { const m = forge.md.sha512.create(); m.update(s); return m.digest().getBytes(); }
@@ -243,7 +265,8 @@ export async function encryptPdf(bytes, password, options = {}) {
  * @param {Uint8Array|ArrayBuffer} bytes - encrypted PDF bytes
  * @param {string} password - either the user or the owner password
  * @returns {Promise<{ bytes: Uint8Array, owner: boolean }>}
- * @throws {Error} with message 'NOT_ENCRYPTED' or 'WRONG_PASSWORD'
+ * @throws {Error} with message 'NOT_ENCRYPTED', 'WRONG_PASSWORD', 'CORRUPT_PDF',
+ *   or 'XREF_STREAM_UNSUPPORTED'
  */
 export async function decryptPdf(bytes, password) {
     // updateMetadata:false - otherwise pdf-lib's constructor unconditionally
@@ -257,6 +280,15 @@ export async function decryptPdf(bytes, password) {
         throw new Error('CORRUPT_PDF');
     }
     if (!encRef) throw new Error('NOT_ENCRYPTED');
+    // Only a problem once we know there's actually something to decrypt - an
+    // unencrypted xref-stream PDF loads and (re)saves through pdf-lib just fine.
+    if (usesXRefStream(bytes)) {
+        throw new Error(
+            'XREF_STREAM_UNSUPPORTED: this PDF uses PDF 1.5+ cross-reference/object streams, ' +
+            'which this library cannot decrypt. Pre-process it first, e.g. ' +
+            '`qpdf --object-streams=disable in.pdf out.pdf`.'
+        );
+    }
 
     let U48, O48, UE32, OE32;
     try {
