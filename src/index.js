@@ -136,6 +136,10 @@ function le32(n) {
     return String.fromCharCode(n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff);
 }
 
+function readLE32(s) {
+    return (s.charCodeAt(0) | (s.charCodeAt(1) << 8) | (s.charCodeAt(2) << 16) | (s.charCodeAt(3) << 24)) >>> 0;
+}
+
 // Permission bits (ISO 32000-1 Table 22): grant print + high-res print + fill
 // forms + accessibility extraction; deny modify/copy/annotate/assemble.
 // Reserved bits (7, 8, 13-32) forced to 1 as required by the spec.
@@ -286,7 +290,12 @@ export async function encryptPdf(bytes, password, options = {}) {
  * Remove password protection from an encrypted PDF.
  * @param {Uint8Array|ArrayBuffer} bytes - encrypted PDF bytes
  * @param {string} password - either the user or the owner password
- * @returns {Promise<{ bytes: Uint8Array, owner: boolean, permissions: number }>}
+ * @returns {Promise<{ bytes: Uint8Array, owner: boolean, permissions: number, permissionsValid: boolean }>}
+ *   permissionsValid is a non-fatal, defense-in-depth check (ISO 32000-2 Algorithm
+ *   13): false means the plaintext /P entry doesn't match the encrypted /Perms
+ *   value, e.g. because someone hand-edited /P after encryption. Permissions are
+ *   advisory per spec, so this never rejects the file, callers may check it and
+ *   decide what a mismatch should mean for them.
  * @throws {Error} with message 'NOT_ENCRYPTED', 'WRONG_PASSWORD', 'CORRUPT_PDF',
  *   'XREF_STREAM_UNSUPPORTED', or 'INVALID_PASSWORD'
  */
@@ -312,7 +321,7 @@ export async function decryptPdf(bytes, password) {
         );
     }
 
-    let U48, O48, UE32, OE32, P;
+    let U48, O48, UE32, OE32, P, Perms32;
     try {
         const encDict = doc.context.lookup(encRef);
         U48 = uint8ToBinaryString(encDict.lookup(PDFName.of('U')).asBytes());
@@ -320,6 +329,7 @@ export async function decryptPdf(bytes, password) {
         UE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('UE')).asBytes());
         OE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('OE')).asBytes());
         P = encDict.lookup(PDFName.of('P')).asNumber();
+        Perms32 = uint8ToBinaryString(encDict.lookup(PDFName.of('Perms')).asBytes());
     } catch {
         throw new Error('CORRUPT_PDF');
     }
@@ -327,13 +337,19 @@ export async function decryptPdf(bytes, password) {
     const auth = authenticatePdfPassword(password, U48, O48, UE32, OE32);
     if (!auth) throw new Error('WRONG_PASSWORD');
 
+    // ISO 32000-2 §7.6.4.4.7, Algorithm 13 (verification direction) - non-fatal
+    // confirmation that /P wasn't hand-edited after encryption; see the JSDoc
+    // above for why this doesn't throw.
+    const permsPlain = aesCbcNoPad(auth.fileKey, '\x00'.repeat(16), Perms32, true);
+    const permissionsValid = permsPlain.substring(9, 12) === 'adb' && readLE32(permsPlain) === (P >>> 0);
+
     doc.context.enumerateIndirectObjects().forEach(([ref, obj]) => {
         if (ref === encRef) return;
         transformPdfValue(obj, (raw) => decryptObjectAESV3(auth.fileKey, raw));
     });
 
     delete doc.context.trailerInfo.Encrypt;
-    return { bytes: await doc.save({ useObjectStreams: false }), owner: auth.owner, permissions: P };
+    return { bytes: await doc.save({ useObjectStreams: false }), owner: auth.owner, permissions: P, permissionsValid };
 }
 
 /**

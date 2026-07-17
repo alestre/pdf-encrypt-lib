@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { inflateSync } from 'node:zlib';
-import { PDFDocument, StandardFonts, PDFName, PDFArray, PDFRawStream } from 'pdf-lib';
+import { PDFDocument, StandardFonts, PDFName, PDFNumber, PDFArray, PDFRawStream } from 'pdf-lib';
 import { encryptPdf, decryptPdf, changePdfPassword } from '../src/index.js';
 
 async function makeTestPdf(text) {
@@ -42,6 +42,7 @@ test('encrypt then decrypt round-trips and produces readable content', async () 
 
     const result = await decryptPdf(encrypted, 'correct horse battery staple');
     assert.equal(result.owner, false);
+    assert.equal(result.permissionsValid, true);
     const text = await extractFirstPageText(result.bytes);
     assert.match(text, /Hello, secret document\./);
 });
@@ -140,4 +141,22 @@ test('decryptPdf throws CORRUPT_PDF instead of silently emptying a too-short enc
     const corrupted = await doc.save({ useObjectStreams: false });
 
     await assert.rejects(() => decryptPdf(corrupted, 'shrink-me'), /CORRUPT_PDF/);
+});
+
+test('decryptPdf flags permissionsValid: false when /P is tampered with, without rejecting the file', async () => {
+    const plain = await makeTestPdf('perms tamper test');
+    const encrypted = await encryptPdf(plain, 'perms-pass');
+
+    // Flip /P to "grant everything" without touching /Perms, simulating an
+    // attacker with the correct password hand-editing the plaintext permission
+    // bits. /Perms was computed from the original /P, so decrypting it with the
+    // (still-correct) file key won't reproduce this new /P value.
+    const doc = await PDFDocument.load(encrypted, { ignoreEncryption: true, updateMetadata: false });
+    const encDict = doc.context.lookup(doc.context.trailerInfo.Encrypt);
+    encDict.set(PDFName.of('P'), PDFNumber.of(-1));
+    const tampered = await doc.save({ useObjectStreams: false });
+
+    const result = await decryptPdf(tampered, 'perms-pass');
+    assert.equal(result.permissionsValid, false);
+    assert.match(await extractFirstPageText(result.bytes), /perms tamper test/);
 });
