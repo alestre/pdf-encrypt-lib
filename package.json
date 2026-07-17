@@ -1,6 +1,6 @@
 {
   "name": "pdf-encrypt-lib",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "PDF Standard Security Handler (AES-256, ISO 32000-2 revision 6) for pdf-lib - adds password protection that pdf-lib itself does not support.",
   "type": "module",
   "main": "src/index.js",
