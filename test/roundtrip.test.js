@@ -132,15 +132,18 @@ test('decryptPdf throws CORRUPT_PDF instead of silently emptying a too-short enc
     const plain = await makeTestPdf('short ciphertext test');
     const encrypted = await encryptPdf(plain, 'shrink-me');
 
-    // Reload without decrypting (same pattern decryptPdf itself uses), then shrink
-    // one indirect stream's contents well below the 17-byte minimum (16-byte IV +
-    // at least 1 PKCS7 block) that any legitimately-encrypted object must have.
-    const doc = await PDFDocument.load(encrypted, { ignoreEncryption: true, updateMetadata: false });
-    const [, someStream] = doc.context.enumerateIndirectObjects().find(([, obj]) => obj instanceof PDFRawStream);
-    someStream.contents = new Uint8Array(5);
-    const corrupted = await doc.save({ useObjectStreams: false });
-
-    await assert.rejects(() => decryptPdf(corrupted, 'shrink-me'), /CORRUPT_PDF/);
+    // The minimum valid AESV3 ciphertext is 32 bytes: 16-byte IV + at least one
+    // 16-byte PKCS7-padded AES block. Test both sides of that boundary: well
+    // below it (5 bytes, hits the old <= 16 guard) and in the 17-31 byte band
+    // that previously slipped through and threw WRONG_PASSWORD instead.
+    for (const size of [5, 17]) {
+        const doc = await PDFDocument.load(encrypted, { ignoreEncryption: true, updateMetadata: false });
+        const [, someStream] = doc.context.enumerateIndirectObjects().find(([, obj]) => obj instanceof PDFRawStream);
+        someStream.contents = new Uint8Array(size);
+        const corrupted = await doc.save({ useObjectStreams: false });
+        await assert.rejects(() => decryptPdf(corrupted, 'shrink-me'), /CORRUPT_PDF/,
+            `expected CORRUPT_PDF for ${size}-byte ciphertext`);
+    }
 });
 
 test('decryptPdf flags permissionsValid: false when /P is tampered with, without rejecting the file', async () => {
