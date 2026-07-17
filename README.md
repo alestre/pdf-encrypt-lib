@@ -107,7 +107,10 @@ await encryptPdf(bytes, 'password', { permissions: DEFAULT_PERMISSIONS });
 npm test
 ```
 
-The test suite ([`test/roundtrip.test.js`](test/roundtrip.test.js)) round-trips encrypt/decrypt/change-password through this library's own code. During development this was additionally cross-validated against [`pypdf`](https://pypdf.readthedocs.io/) (encrypting with this library and reading with pypdf, and vice versa) to confirm spec compliance against an independent implementation, not just internal self-consistency.
+The test suite has two parts:
+
+- [`test/roundtrip.test.js`](test/roundtrip.test.js) round-trips encrypt/decrypt/change-password through this library's own code.
+- [`test/interop.test.js`](test/interop.test.js) cross-validates against independent tools: [qpdf](https://qpdf.readthedocs.io/) (our output decrypted by qpdf, and qpdf-encrypted files decrypted by us) and [poppler](https://poppler.freedesktop.org/) (text extraction from our encrypted output). These tests are skipped automatically if the tools are not installed. They exist to catch spec compliance bugs that pure self-consistency tests cannot find.
 
 ## Changelog
 
