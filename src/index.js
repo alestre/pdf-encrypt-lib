@@ -187,7 +187,7 @@ function encryptObjectAESV3(fileKey32, plaintext) {
 }
 
 function decryptObjectAESV3(fileKey32, data) {
-    if (data.length <= 16) return '';
+    if (data.length <= 16) throw new Error('CORRUPT_PDF');
     return aesCbcPkcs7Decrypt(fileKey32, data.substring(0, 16), data.substring(16));
 }
 

@@ -126,3 +126,18 @@ test('only the first 127 UTF-8 bytes of a password are significant', async () =>
     const result = await decryptPdf(encrypted, alsoValidPwd);
     assert.match(await extractFirstPageText(result.bytes), /long password test/);
 });
+
+test('decryptPdf throws CORRUPT_PDF instead of silently emptying a too-short encrypted object', async () => {
+    const plain = await makeTestPdf('short ciphertext test');
+    const encrypted = await encryptPdf(plain, 'shrink-me');
+
+    // Reload without decrypting (same pattern decryptPdf itself uses), then shrink
+    // one indirect stream's contents well below the 17-byte minimum (16-byte IV +
+    // at least 1 PKCS7 block) that any legitimately-encrypted object must have.
+    const doc = await PDFDocument.load(encrypted, { ignoreEncryption: true, updateMetadata: false });
+    const [, someStream] = doc.context.enumerateIndirectObjects().find(([, obj]) => obj instanceof PDFRawStream);
+    someStream.contents = new Uint8Array(5);
+    const corrupted = await doc.save({ useObjectStreams: false });
+
+    await assert.rejects(() => decryptPdf(corrupted, 'shrink-me'), /CORRUPT_PDF/);
+});
