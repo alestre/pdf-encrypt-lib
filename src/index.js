@@ -8,6 +8,7 @@
 // both provided by node-forge.
 
 import forge from 'node-forge';
+import saslprep from 'saslprep';
 import { PDFDocument, PDFName, PDFHexString, PDFNumber, PDFBool, PDFDict, PDFStream, PDFRawStream, PDFString, PDFArray } from 'pdf-lib';
 
 function randomBytes(n) {
@@ -40,6 +41,49 @@ function bytesToHex(bin) {
     return hex;
 }
 
+// ISO 32000-2 §7.6.4.3.3 - SASLprep (RFC 4013) the password before UTF-8 encoding
+// it, then truncate the resulting UTF-8 bytes to 127 (forge.util.encodeUtf8
+// returns a JS binary string, one char per byte, so substring() truncates bytes,
+// not code points). saslprep() throws on prohibited/unassigned characters or
+// invalid bidi mixing (RFC 4013 §2.3-2.4); surfaced as a typed error to match
+// the rest of this file's error-handling convention.
+function preparePassword(password) {
+    let prepped;
+    try {
+        // allowUnassigned: RFC 3454's "unassigned code points" table is frozen at
+        // Unicode 3.2 (2002) - without this, any modern character absent from that
+        // table (most emoji, many newer scripts) is rejected as "unassigned" even
+        // though it's perfectly valid Unicode today. Mapping, NFKC normalization,
+        // the prohibited-character list, and the bidi check all still apply.
+        prepped = saslprep(password, { allowUnassigned: true });
+    } catch (err) {
+        throw new Error(`INVALID_PASSWORD: ${err.message}`);
+    }
+    return forge.util.encodeUtf8(prepped).substring(0, 127);
+}
+
+// PDF 1.5+ cross-reference streams almost always come with compressed object
+// streams, which pdf-lib decompresses while parsing/accessing the document -
+// before this library can supply the file key. Detect the structural feature
+// up front instead of letting pdf-lib corrupt its object graph on encrypted,
+// still-undecrypted object-stream bytes.
+function usesXRefStream(bytes) {
+    const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const s = uint8ToBinaryString(u8);
+    const last = s.lastIndexOf('startxref');
+    if (last === -1) return false; // ambiguous - let normal load/CORRUPT_PDF handling take over
+    const m = /startxref\s+(\d+)/.exec(s.slice(last));
+    if (!m) return false;
+    const offset = Number(m[1]);
+    if (offset < 0 || offset >= s.length) return false;
+    const atOffset = s.slice(offset, offset + 4);
+    if (!/^xref\b/.test(atOffset)) return true; // no classic keyword at the xref offset -> stream-based
+    // classic table found, but a hybrid file can still carry object streams via /XRefStm
+    const trailerIdx = s.indexOf('trailer', offset);
+    const trailerBlock = trailerIdx === -1 ? '' : s.slice(trailerIdx, last);
+    return /\/XRefStm\b/.test(trailerBlock);
+}
+
 function sha256(s) { const m = forge.md.sha256.create(); m.update(s); return m.digest().getBytes(); }
 function sha384(s) { const m = forge.md.sha384.create(); m.update(s); return m.digest().getBytes(); }
 function sha512(s) { const m = forge.md.sha512.create(); m.update(s); return m.digest().getBytes(); }
@@ -68,7 +112,7 @@ function aesCbcPkcs7Decrypt(key, iv, data) {
     return d.output.getBytes();
 }
 
-// ISO 32000-2 Algorithm 2.B - hardened password hash (revision 6).
+// ISO 32000-2 §7.6.4.3.4, Algorithm 2.B - hardened password hash (revision 6).
 function hash2B(passwordBytes, saltBytes, userKeyBytes) {
     userKeyBytes = userKeyBytes || '';
     let K = sha256(passwordBytes + saltBytes + userKeyBytes);
@@ -92,16 +136,22 @@ function le32(n) {
     return String.fromCharCode(n & 0xff, (n >>> 8) & 0xff, (n >>> 16) & 0xff, (n >>> 24) & 0xff);
 }
 
+function readLE32(s) {
+    return (s.charCodeAt(0) | (s.charCodeAt(1) << 8) | (s.charCodeAt(2) << 16) | (s.charCodeAt(3) << 24)) >>> 0;
+}
+
 // Permission bits (ISO 32000-1 Table 22): grant print + high-res print + fill
 // forms + accessibility extraction; deny modify/copy/annotate/assemble.
 // Reserved bits (7, 8, 13-32) forced to 1 as required by the spec.
 const DEFAULT_PERMISSIONS = ((4 | 2048 | 256 | 512) | (0xFFFFF000 | 0xC0)) >>> 0;
 
+// ISO 32000-2 §7.6.4.4.7, Algorithm 13 - compute the encrypted Perms value.
 function computePerms(P, encryptMetadata, fileKey32) {
     const buf = le32(P) + '\xff\xff\xff\xff' + (encryptMetadata ? 'T' : 'F') + 'adb' + randomBytes(4);
     return aesCbcNoPad(fileKey32, '\x00'.repeat(16), buf, false);
 }
 
+// ISO 32000-2 §7.6.4.4.4, Algorithm 8 - compute the U and UE values.
 function computeUandUE(userPwdBytes, fileKey32) {
     const validationSalt = randomBytes(8), keySalt = randomBytes(8);
     const hash = hash2B(userPwdBytes, validationSalt, null);
@@ -112,6 +162,7 @@ function computeUandUE(userPwdBytes, fileKey32) {
     };
 }
 
+// ISO 32000-2 §7.6.4.4.5, Algorithm 9 - compute the O and OE values.
 function computeOandOE(ownerPwdBytes, U48, fileKey32) {
     const validationSalt = randomBytes(8), keySalt = randomBytes(8);
     const hash = hash2B(ownerPwdBytes, validationSalt, U48);
@@ -122,8 +173,9 @@ function computeOandOE(ownerPwdBytes, U48, fileKey32) {
     };
 }
 
+// ISO 32000-2 §7.6.4.4.10 / §7.6.4.4.11, Algorithms 6 and 7 - authenticate the user/owner password.
 function authenticatePdfPassword(password, U48, O48, UE32, OE32) {
-    const pwdBytes = forge.util.encodeUtf8(password);
+    const pwdBytes = preparePassword(password);
     const uVal = U48.substring(0, 32), uVSalt = U48.substring(32, 40), uKSalt = U48.substring(40, 48);
     if (hash2B(pwdBytes, uVSalt, null) === uVal) {
         const ik = hash2B(pwdBytes, uKSalt, null);
@@ -137,18 +189,27 @@ function authenticatePdfPassword(password, U48, O48, UE32, OE32) {
     return null;
 }
 
+// ISO 32000-2 §7.6.5.3, Algorithm 1.A - AES-256 (AESV3) object encryption/decryption.
 function encryptObjectAESV3(fileKey32, plaintext) {
     const iv = randomBytes(16);
     return iv + aesCbcPkcs7Encrypt(fileKey32, iv, plaintext);
 }
 
 function decryptObjectAESV3(fileKey32, data) {
-    if (data.length <= 16) return '';
+    if (data.length < 32) throw new Error('CORRUPT_PDF');
     return aesCbcPkcs7Decrypt(fileKey32, data.substring(0, 16), data.substring(16));
 }
 
 // Walk every indirect object in the document, transforming every PDFString/
 // PDFHexString value and every raw stream's contents via fn(binaryString).
+//
+// No cycle guard needed: enumerateIndirectObjects() is Map-backed (each ref
+// visited once - see walkAndTransform below), and this recursion never follows
+// PDFRef - only a single object's directly-embedded PDFDict/PDFArray/PDFStream
+// structure, which PDF syntax cannot make cyclic without going through a ref.
+// No depth guard added either: pdf-lib's own parser has no depth limit, so a
+// PDF deep enough to overflow this walk would already overflow PDFDocument.load()
+// itself, before this code runs.
 function walkDict(dict, fn) {
     dict.entries().forEach(([key, val]) => {
         const replaced = transformLeaf(val, fn);
@@ -201,10 +262,13 @@ export async function encryptPdf(bytes, password, options = {}) {
     // objects in the graph before we enumerate and encrypt everything below.
     const doc = await PDFDocument.load(bytes);
     const fileKey = randomBytes(32);
-    const pwdBytes = forge.util.encodeUtf8(password);
-    const ownerPwdBytes = forge.util.encodeUtf8(options.ownerPassword ?? password);
+    const pwdBytes = preparePassword(password);
+    const ownerPwdBytes = preparePassword(options.ownerPassword ?? password);
     const permissions = options.permissions ?? DEFAULT_PERMISSIONS;
 
+    // Invariant: encryptDict below must be built and registered *after* this walk -
+    // walkAndTransform encrypts every indirect object it finds, and encryptDict
+    // (O/U/OE/UE) must never be one of them.
     walkAndTransform(doc, (raw) => encryptObjectAESV3(fileKey, raw));
 
     const uPair = computeUandUE(pwdBytes, fileKey);
@@ -232,8 +296,19 @@ export async function encryptPdf(bytes, password, options = {}) {
     });
     doc.context.trailerInfo.Encrypt = doc.context.register(encryptDict);
 
-    const idHex = PDFHexString.of(bytesToHex(randomBytes(16)));
-    doc.context.trailerInfo.ID = doc.context.obj([idHex, idHex]);
+    // Invariant: ID must stay a direct object on trailerInfo, never
+    // doc.context.register(...)'d - enumerateIndirectObjects (used by this
+    // function's walk above and by decryptPdf's own walk later) only sees
+    // registered indirect objects. An indirect ID would get silently
+    // "decrypted" (corrupted) by decryptPdf on the round trip.
+    //
+    // ISO 32000-2 §14.4: first element is the permanent document ID (set at
+    // creation, never changed); second element rotates with each modification.
+    const existingId = doc.context.trailerInfo.ID;
+    const firstId = (existingId instanceof PDFArray && existingId.size() >= 1)
+        ? existingId.get(0)
+        : PDFHexString.of(bytesToHex(randomBytes(16)));
+    doc.context.trailerInfo.ID = doc.context.obj([firstId, PDFHexString.of(bytesToHex(randomBytes(16)))]);
 
     return doc.save({ useObjectStreams: false });
 }
@@ -242,8 +317,14 @@ export async function encryptPdf(bytes, password, options = {}) {
  * Remove password protection from an encrypted PDF.
  * @param {Uint8Array|ArrayBuffer} bytes - encrypted PDF bytes
  * @param {string} password - either the user or the owner password
- * @returns {Promise<{ bytes: Uint8Array, owner: boolean }>}
- * @throws {Error} with message 'NOT_ENCRYPTED' or 'WRONG_PASSWORD'
+ * @returns {Promise<{ bytes: Uint8Array, owner: boolean, permissions: number, permissionsValid: boolean }>}
+ *   permissionsValid is a non-fatal, defense-in-depth check (ISO 32000-2 Algorithm
+ *   13): false means the plaintext /P entry doesn't match the encrypted /Perms
+ *   value, e.g. because someone hand-edited /P after encryption. Permissions are
+ *   advisory per spec, so this never rejects the file, callers may check it and
+ *   decide what a mismatch should mean for them.
+ * @throws {Error} with message 'NOT_ENCRYPTED', 'WRONG_PASSWORD', 'CORRUPT_PDF',
+ *   'XREF_STREAM_UNSUPPORTED', or 'INVALID_PASSWORD'
  */
 export async function decryptPdf(bytes, password) {
     // updateMetadata:false - otherwise pdf-lib's constructor unconditionally
@@ -257,14 +338,25 @@ export async function decryptPdf(bytes, password) {
         throw new Error('CORRUPT_PDF');
     }
     if (!encRef) throw new Error('NOT_ENCRYPTED');
+    // Only a problem once we know there's actually something to decrypt - an
+    // unencrypted xref-stream PDF loads and (re)saves through pdf-lib just fine.
+    if (usesXRefStream(bytes)) {
+        throw new Error(
+            'XREF_STREAM_UNSUPPORTED: this PDF uses PDF 1.5+ cross-reference/object streams, ' +
+            'which this library cannot decrypt. Pre-process it first, e.g. ' +
+            '`qpdf --object-streams=disable in.pdf out.pdf`.'
+        );
+    }
 
-    let U48, O48, UE32, OE32;
+    let U48, O48, UE32, OE32, P, Perms32;
     try {
         const encDict = doc.context.lookup(encRef);
         U48 = uint8ToBinaryString(encDict.lookup(PDFName.of('U')).asBytes());
         O48 = uint8ToBinaryString(encDict.lookup(PDFName.of('O')).asBytes());
         UE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('UE')).asBytes());
         OE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('OE')).asBytes());
+        P = encDict.lookup(PDFName.of('P')).asNumber();
+        Perms32 = uint8ToBinaryString(encDict.lookup(PDFName.of('Perms')).asBytes());
     } catch {
         throw new Error('CORRUPT_PDF');
     }
@@ -272,25 +364,39 @@ export async function decryptPdf(bytes, password) {
     const auth = authenticatePdfPassword(password, U48, O48, UE32, OE32);
     if (!auth) throw new Error('WRONG_PASSWORD');
 
+    // ISO 32000-2 §7.6.4.4.7, Algorithm 13 (verification direction) - non-fatal
+    // confirmation that /P wasn't hand-edited after encryption; see the JSDoc
+    // above for why this doesn't throw.
+    const permsPlain = aesCbcNoPad(auth.fileKey, '\x00'.repeat(16), Perms32, true);
+    const permissionsValid = permsPlain.substring(9, 12) === 'adb' && readLE32(permsPlain) === (P >>> 0);
+
     doc.context.enumerateIndirectObjects().forEach(([ref, obj]) => {
         if (ref === encRef) return;
         transformPdfValue(obj, (raw) => decryptObjectAESV3(auth.fileKey, raw));
     });
 
     delete doc.context.trailerInfo.Encrypt;
-    return { bytes: await doc.save({ useObjectStreams: false }), owner: auth.owner };
+    return { bytes: await doc.save({ useObjectStreams: false }), owner: auth.owner, permissions: P, permissionsValid };
 }
 
 /**
  * Change the password of an encrypted PDF (decrypt then re-encrypt).
+ *
+ * Authenticates with `oldPassword` (accepted as either the user or the owner
+ * password) and re-encrypts with `newPassword`. Pass `options.ownerPassword`
+ * to set a distinct owner password; without it both roles use `newPassword`.
+ * Original document permissions are preserved unless overridden via
+ * `options.permissions`.
+ *
  * @param {Uint8Array|ArrayBuffer} bytes
  * @param {string} oldPassword
  * @param {string} newPassword
+ * @param {{ ownerPassword?: string, permissions?: number }} [options]
  * @returns {Promise<Uint8Array>}
  */
-export async function changePdfPassword(bytes, oldPassword, newPassword) {
+export async function changePdfPassword(bytes, oldPassword, newPassword, options = {}) {
     const plain = await decryptPdf(bytes, oldPassword);
-    return encryptPdf(plain.bytes, newPassword);
+    return encryptPdf(plain.bytes, newPassword, { permissions: plain.permissions, ...options });
 }
 
 export { DEFAULT_PERMISSIONS };

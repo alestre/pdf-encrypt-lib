@@ -97,6 +97,20 @@ test(
 );
 
 test(
+    'decryptPdf rejects a qpdf-encrypted PDF that uses xref/object streams with a clear error',
+    { skip: qpdfAvailable ? false : 'qpdf not found on this machine' },
+    () => withTempEncryptedPdf(async (_encPath, dir) => {
+        const plainPath = path.join(dir, 'plain.pdf');
+        const qpdfEncPath = path.join(dir, 'qpdf-enc.pdf');
+        await writeFile(plainPath, await makeTestPdf(CONTENT));
+        // no --object-streams=disable this time - qpdf's default (xref stream + ObjStm)
+        execFileSync('qpdf', ['--encrypt', PASSWORD, PASSWORD, '256', '--', plainPath, qpdfEncPath]);
+        const encrypted = await readFile(qpdfEncPath);
+        await assert.rejects(() => decryptPdf(encrypted, PASSWORD), /XREF_STREAM_UNSUPPORTED/);
+    })
+);
+
+test(
     'poppler (native or WSL) extracts the original text with the correct password',
     { skip: popplerMode ? false : 'poppler not found natively or via WSL on this machine' },
     () => withTempEncryptedPdf(async (encPath) => {
