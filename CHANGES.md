@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.1.5] - 2026-07-17
+## [0.1.5] (2026-07-17)
 
 ### Added
 
@@ -20,7 +20,7 @@ All notable changes to this project will be documented in this file.
   `permissionsValid: false`, while decryption still succeeds and content is
   still correctly decrypted.
 
-## [0.1.4] - 2026-07-17
+## [0.1.4] (2026-07-17)
 
 ### Fixed
 
@@ -35,7 +35,7 @@ All notable changes to this project will be documented in this file.
 - Corrupted per-object ciphertext (shrunk below the minimum valid length)
   asserts `CORRUPT_PDF` instead of silently succeeding with empty content.
 
-## [0.1.3] - 2026-07-17
+## [0.1.3] (2026-07-17)
 
 ### Fixed
 
@@ -62,7 +62,7 @@ All notable changes to this project will be documented in this file.
 - Two passwords sharing the same first 127 UTF-8 bytes both authenticate the
   same file.
 
-## [0.1.2] - 2026-07-17
+## [0.1.2] (2026-07-17)
 
 ### Fixed
 
@@ -74,7 +74,7 @@ All notable changes to this project will be documented in this file.
   instance of undefined`, because pdf-lib decompresses object streams while
   parsing/accessing the document, before this library can supply the file key.
 
-## [0.1.1] - 2026-07-17
+## [0.1.1] (2026-07-17)
 
 ### Fixed
 
@@ -90,7 +90,7 @@ All notable changes to this project will be documented in this file.
 - Garbage input to `decryptPdf` asserts `CORRUPT_PDF`
 - Reverse interop: qpdf-encrypted PDF decrypted by this library
 
-## [0.1.0] - 2026-07-15
+## [0.1.0] (2026-07-15)
 
 Initial release. AES-256 PDF encryption and decryption implementing
 ISO 32000-2 revision 6 (V=5, R=6, AESV3) on top of pdf-lib and

@@ -1,10 +1,10 @@
 # pdf-encrypt-lib
 
-Password protection for [pdf-lib](https://github.com/Hopding/pdf-lib) - which has no built-in encryption support ([long-standing open feature request](https://github.com/Hopding/pdf-lib/issues/23)).
+Password protection for [pdf-lib](https://github.com/Hopding/pdf-lib), which has no built-in encryption support ([long-standing open feature request](https://github.com/Hopding/pdf-lib/issues?q=encrypt)).
 
 Implements the PDF Standard Security Handler, Version 5 / Revision 6 (AES-256), as specified in ISO 32000-2, directly on top of pdf-lib's object model. Works in both Node.js (18.19+/19+, for `globalThis.crypto`) and modern browsers.
 
-Revision 6 was chosen over the older Revision 4 (AES-128) because R4's key derivation requires RC4 even though the content itself is AES-encrypted - R6 needs only AES-CBC and SHA-256/384/512, both already provided by [node-forge](https://github.com/digitalbazaar/forge).
+Revision 6 was chosen over the older Revision 4 (AES-128) because R4's key derivation requires RC4 even though the content itself is AES-encrypted. R6 needs only AES-CBC and SHA-256/384/512, both already provided by [node-forge](https://github.com/digitalbazaar/forge).
 
 ## Install
 
@@ -12,7 +12,7 @@ Revision 6 was chosen over the older Revision 4 (AES-128) because R4's key deriv
 npm install pdf-encrypt-lib pdf-lib node-forge
 ```
 
-`pdf-lib` and `node-forge` are peer dependencies - install them alongside this package.
+`pdf-lib` and `node-forge` are peer dependencies. Install them alongside this package.
 
 ## Usage
 
@@ -62,7 +62,7 @@ await encryptPdf(bytes, 'password', { permissions: DEFAULT_PERMISSIONS });
 - `encryptPdf(bytes, password, options?) -> Promise<Uint8Array>`
 - `decryptPdf(bytes, password) -> Promise<{ bytes: Uint8Array, owner: boolean }>`
 - `changePdfPassword(bytes, oldPassword, newPassword) -> Promise<Uint8Array>`
-- `DEFAULT_PERMISSIONS` - the permission bitmask used when `options.permissions` isn't given
+- `DEFAULT_PERMISSIONS`: the permission bitmask used when `options.permissions` isn't given
 
 `decryptPdf` throws `Error('NOT_ENCRYPTED')` if the input has no `/Encrypt` dictionary, and `Error('WRONG_PASSWORD')` if authentication fails.
 
@@ -70,7 +70,7 @@ await encryptPdf(bytes, 'password', { permissions: DEFAULT_PERMISSIONS });
 
 - Every indirect string and raw stream in the document is walked and encrypted/decrypted individually with AES-256-CBC, using a random 16-byte IV prepended to each ciphertext (`walkAndTransform` in `src/index.js`).
 - The file encryption key is a random 32 bytes, wrapped separately for the user and owner password via ISO 32000-2 Algorithm 2.B (a "hardened" hash: SHA-256, then 64+ rounds of AES-128-CBC re-encryption alternating between SHA-256/384/512 depending on a checksum of each round's output).
-- Unlike Revision 4, V5/R6 uses the file encryption key directly for every object - no per-object key derivation.
+- Unlike Revision 4, V5/R6 uses the file encryption key directly for every object, without per-object key derivation.
 - Two pdf-lib quirks are worked around: `PDFRawStream` is not a `PDFDict` (separate class, so its `.dict` needs walking separately from its `.contents`), and `PDFDocument`'s constructor unconditionally overwrites `/Producer`/`/ModDate` unless `updateMetadata: false` is passed when loading an already-encrypted file for decryption.
 
 ## Testing
@@ -80,6 +80,10 @@ npm test
 ```
 
 The test suite ([`test/roundtrip.test.js`](test/roundtrip.test.js)) round-trips encrypt/decrypt/change-password through this library's own code. During development this was additionally cross-validated against [`pypdf`](https://pypdf.readthedocs.io/) (encrypting with this library and reading with pypdf, and vice versa) to confirm spec compliance against an independent implementation, not just internal self-consistency.
+
+## Changelog
+
+See [CHANGES.md](CHANGES.md).
 
 ## License
 
