@@ -28,8 +28,10 @@ This is a limitation of [pdf-lib's parser](https://github.com/Hopding/pdf-lib), 
 
 ## Install
 
+Not yet published to npm. Install directly from the repository:
+
 ```
-npm install pdf-encrypt-lib pdf-lib node-forge
+npm install git+https://codeberg.org/alestre/pdf-encrypt-lib.git pdf-lib node-forge
 ```
 
 `pdf-lib` and `node-forge` are peer dependencies. Install them alongside this package.
