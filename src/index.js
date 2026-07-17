@@ -202,6 +202,14 @@ function decryptObjectAESV3(fileKey32, data) {
 
 // Walk every indirect object in the document, transforming every PDFString/
 // PDFHexString value and every raw stream's contents via fn(binaryString).
+//
+// No cycle guard needed: enumerateIndirectObjects() is Map-backed (each ref
+// visited once - see walkAndTransform below), and this recursion never follows
+// PDFRef - only a single object's directly-embedded PDFDict/PDFArray/PDFStream
+// structure, which PDF syntax cannot make cyclic without going through a ref.
+// No depth guard added either: pdf-lib's own parser has no depth limit, so a
+// PDF deep enough to overflow this walk would already overflow PDFDocument.load()
+// itself, before this code runs.
 function walkDict(dict, fn) {
     dict.entries().forEach(([key, val]) => {
         const replaced = transformLeaf(val, fn);
