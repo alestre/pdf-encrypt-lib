@@ -2,7 +2,7 @@
 
 Password protection for [pdf-lib](https://github.com/Hopding/pdf-lib), which has no built-in encryption support ([long-standing open feature request](https://github.com/Hopding/pdf-lib/issues?q=encrypt)).
 
-Built for [PDF File Manager](https://ascend-digital.net) by [Ascend Digital](https://ascend-digital.net).
+Built for [PDF File Manager](https://ascend-digital.net/tools/pdffile/) by [Ascend Digital](https://ascend-digital.net).
 
 Implements the PDF Standard Security Handler, Version 5 / Revision 6 (AES-256), as specified in ISO 32000-2, directly on top of pdf-lib's object model. Works in both Node.js (18.19+/19+, for `globalThis.crypto`) and modern browsers.
 
