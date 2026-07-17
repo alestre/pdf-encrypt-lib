@@ -146,6 +146,19 @@ test('decryptPdf throws CORRUPT_PDF instead of silently emptying a too-short enc
     }
 });
 
+test('changePdfPassword with options.ownerPassword sets a distinct new owner password', async () => {
+    const plain = await makeTestPdf('two-password rotate test');
+    const encrypted = await encryptPdf(plain, 'user-pass', { ownerPassword: 'old-owner' });
+    const rotated = await changePdfPassword(encrypted, 'old-owner', 'new-user', { ownerPassword: 'new-owner' });
+
+    await assert.rejects(() => decryptPdf(rotated, 'old-owner'), /WRONG_PASSWORD/);
+    const asUser = await decryptPdf(rotated, 'new-user');
+    assert.equal(asUser.owner, false);
+    const asOwner = await decryptPdf(rotated, 'new-owner');
+    assert.equal(asOwner.owner, true);
+    assert.match(await extractFirstPageText(asOwner.bytes), /two-password rotate test/);
+});
+
 test('decryptPdf flags permissionsValid: false when /P is tampered with, without rejecting the file', async () => {
     const plain = await makeTestPdf('perms tamper test');
     const encrypted = await encryptPdf(plain, 'perms-pass');

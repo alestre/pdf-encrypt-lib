@@ -376,22 +376,21 @@ export async function decryptPdf(bytes, password) {
 /**
  * Change the password of an encrypted PDF (decrypt then re-encrypt).
  *
- * Note: if the original document used distinct user and owner passwords, this
- * function does not preserve that model. It authenticates with `oldPassword`
- * (accepted as either the user or the owner password) and re-encrypts with
- * `newPassword` as both the user and owner password, collapsing any two-password
- * arrangement into a single password. If you need to rotate a two-password
- * document while keeping the passwords distinct, call `decryptPdf` and
- * `encryptPdf` directly and supply `options.ownerPassword` to `encryptPdf`.
+ * Authenticates with `oldPassword` (accepted as either the user or the owner
+ * password) and re-encrypts with `newPassword`. Pass `options.ownerPassword`
+ * to set a distinct owner password; without it both roles use `newPassword`.
+ * Original document permissions are preserved unless overridden via
+ * `options.permissions`.
  *
  * @param {Uint8Array|ArrayBuffer} bytes
  * @param {string} oldPassword
  * @param {string} newPassword
+ * @param {{ ownerPassword?: string, permissions?: number }} [options]
  * @returns {Promise<Uint8Array>}
  */
-export async function changePdfPassword(bytes, oldPassword, newPassword) {
+export async function changePdfPassword(bytes, oldPassword, newPassword, options = {}) {
     const plain = await decryptPdf(bytes, oldPassword);
-    return encryptPdf(plain.bytes, newPassword, { permissions: plain.permissions });
+    return encryptPdf(plain.bytes, newPassword, { permissions: plain.permissions, ...options });
 }
 
 export { DEFAULT_PERMISSIONS };

@@ -2,6 +2,8 @@
 
 Password protection for [pdf-lib](https://github.com/Hopding/pdf-lib), which has no built-in encryption support ([long-standing open feature request](https://github.com/Hopding/pdf-lib/issues?q=encrypt)).
 
+Built for [PDF File Manager](https://ascend-digital.net/tools/pdffile/) by [Ascend Digital](https://ascend-digital.net).
+
 Implements the PDF Standard Security Handler, Version 5 / Revision 6 (AES-256), as specified in ISO 32000-2, directly on top of pdf-lib's object model. Works in both Node.js (18.19+/19+, for `globalThis.crypto`) and modern browsers.
 
 Revision 6 was chosen over the older Revision 4 (AES-128) because R4's key derivation requires RC4 even though the content itself is AES-encrypted. R6 needs only AES-CBC and SHA-256/384/512, both already provided by [node-forge](https://github.com/digitalbazaar/forge).
@@ -45,7 +47,11 @@ The PDF spec distinguishes a *user* password (needed to open/view the file) from
 await encryptPdf(bytes, 'view-only-password', { ownerPassword: 'master-password' });
 ```
 
-`decryptPdf()` accepts either password and returns `{ bytes, owner }`, where `owner` tells you which one was used.
+`decryptPdf()` accepts either password and returns `{ bytes, owner }`, where `owner` tells you which one was used. `changePdfPassword()` accepts the same `options` as `encryptPdf`, so you can rotate both passwords independently:
+
+```js
+await changePdfPassword(bytes, 'old-pass', 'new-user-pass', { ownerPassword: 'new-owner-pass' });
+```
 
 ### Permissions
 
@@ -61,7 +67,7 @@ await encryptPdf(bytes, 'password', { permissions: DEFAULT_PERMISSIONS });
 
 - `encryptPdf(bytes, password, options?) -> Promise<Uint8Array>`
 - `decryptPdf(bytes, password) -> Promise<{ bytes: Uint8Array, owner: boolean }>`
-- `changePdfPassword(bytes, oldPassword, newPassword) -> Promise<Uint8Array>`
+- `changePdfPassword(bytes, oldPassword, newPassword, options?) -> Promise<Uint8Array>`
 - `DEFAULT_PERMISSIONS`: the permission bitmask used when `options.permissions` isn't given
 
 `decryptPdf` throws `Error('NOT_ENCRYPTED')` if the input has no `/Encrypt` dictionary, and `Error('WRONG_PASSWORD')` if authentication fails.
@@ -88,3 +94,7 @@ See [CHANGES.md](CHANGES.md).
 ## License
 
 MIT
+
+---
+
+If this library saved you time, [Monero donations are welcome](https://xmrchat.com/alestre).
