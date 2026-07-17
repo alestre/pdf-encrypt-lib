@@ -74,3 +74,23 @@ test('a distinct owner password also authenticates and unlocks the file', async 
     assert.equal(asOwner.owner, true);
     assert.match(await extractFirstPageText(asOwner.bytes), /owner test/);
 });
+
+test('unicode password round-trips correctly', async () => {
+    const plain = await makeTestPdf('unicode password test');
+    const pwd = 'Päsśwörð-\u{1F511}';
+    const encrypted = await encryptPdf(plain, pwd);
+    const result = await decryptPdf(encrypted, pwd);
+    assert.match(await extractFirstPageText(result.bytes), /unicode password test/);
+});
+
+test('empty string password round-trips correctly', async () => {
+    const plain = await makeTestPdf('empty password test');
+    const encrypted = await encryptPdf(plain, '');
+    const result = await decryptPdf(encrypted, '');
+    assert.match(await extractFirstPageText(result.bytes), /empty password test/);
+});
+
+test('decryptPdf throws CORRUPT_PDF on unparseable input', async () => {
+    const garbage = new Uint8Array(128).fill(0x42);
+    await assert.rejects(() => decryptPdf(garbage, 'any'), /CORRUPT_PDF/);
+});
