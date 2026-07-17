@@ -301,8 +301,14 @@ export async function encryptPdf(bytes, password, options = {}) {
     // function's walk above and by decryptPdf's own walk later) only sees
     // registered indirect objects. An indirect ID would get silently
     // "decrypted" (corrupted) by decryptPdf on the round trip.
-    const idHex = PDFHexString.of(bytesToHex(randomBytes(16)));
-    doc.context.trailerInfo.ID = doc.context.obj([idHex, idHex]);
+    //
+    // ISO 32000-2 §14.4: first element is the permanent document ID (set at
+    // creation, never changed); second element rotates with each modification.
+    const existingId = doc.context.trailerInfo.ID;
+    const firstId = (existingId instanceof PDFArray && existingId.size() >= 1)
+        ? existingId.get(0)
+        : PDFHexString.of(bytesToHex(randomBytes(16)));
+    doc.context.trailerInfo.ID = doc.context.obj([firstId, PDFHexString.of(bytesToHex(randomBytes(16)))]);
 
     return doc.save({ useObjectStreams: false });
 }
