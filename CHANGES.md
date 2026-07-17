@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2026-07-17
+
+### Added
+
+- `decryptPdf` now returns a `permissionsValid` field (ISO 32000-2 Algorithm 13
+  verification): decrypts `/Perms` with the derived file key and checks it
+  against the plaintext `/P` entry, catching the case where `/P` was hand-edited
+  after encryption. Non-fatal, matching pypdf/qpdf's own behavior, since
+  permissions are advisory per spec; callers may check the field and decide what
+  a mismatch should mean for them.
+
+### Tests
+
+- Encrypt/decrypt round-trip asserts `permissionsValid: true`.
+- Tampering with `/P` after encryption (without touching `/Perms`) asserts
+  `permissionsValid: false`, while decryption still succeeds and content is
+  still correctly decrypted.
+
 ## [0.1.4] - 2026-07-17
 
 ### Fixed
