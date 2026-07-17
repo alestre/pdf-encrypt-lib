@@ -196,7 +196,7 @@ function encryptObjectAESV3(fileKey32, plaintext) {
 }
 
 function decryptObjectAESV3(fileKey32, data) {
-    if (data.length <= 16) throw new Error('CORRUPT_PDF');
+    if (data.length < 32) throw new Error('CORRUPT_PDF');
     return aesCbcPkcs7Decrypt(fileKey32, data.substring(0, 16), data.substring(16));
 }
 
@@ -375,6 +375,15 @@ export async function decryptPdf(bytes, password) {
 
 /**
  * Change the password of an encrypted PDF (decrypt then re-encrypt).
+ *
+ * Note: if the original document used distinct user and owner passwords, this
+ * function does not preserve that model. It authenticates with `oldPassword`
+ * (accepted as either the user or the owner password) and re-encrypts with
+ * `newPassword` as both the user and owner password, collapsing any two-password
+ * arrangement into a single password. If you need to rotate a two-password
+ * document while keeping the passwords distinct, call `decryptPdf` and
+ * `encryptPdf` directly and supply `options.ownerPassword` to `encryptPdf`.
+ *
  * @param {Uint8Array|ArrayBuffer} bytes
  * @param {string} oldPassword
  * @param {string} newPassword

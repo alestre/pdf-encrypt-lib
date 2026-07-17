@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6] (2026-07-17)
+
+### Fixed
+
+- `decryptObjectAESV3` now correctly throws `Error('CORRUPT_PDF')` for any
+  ciphertext shorter than 32 bytes (16-byte IV + one minimum 16-byte PKCS7
+  block). Previously only lengths 0-16 were caught; lengths 17-31 passed the
+  guard and reached `aesCbcPkcs7Decrypt`, which threw `WRONG_PASSWORD` because
+  forge's CBC decrypter fails PKCS7 unpadding on a sub-block input. A caller
+  receiving `WRONG_PASSWORD` would naturally suspect the password, not file
+  corruption.
+
+### Documented
+
+- `changePdfPassword` JSDoc now explicitly states that it collapses a
+  two-password document (distinct user/owner passwords) into a single password,
+  and points callers who need to preserve the two-password model to `decryptPdf`
+  + `encryptPdf` directly.
+
+### Tests
+
+- The short-ciphertext test now exercises both the 0-16 byte range (previous
+  guard) and the 17-31 byte range (newly fixed), asserting `CORRUPT_PDF` for
+  both.
+
 ## [0.1.5] (2026-07-17)
 
 ### Added
