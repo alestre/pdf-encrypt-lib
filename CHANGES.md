@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.8] (2026-07-17)
+
+### Fixed
+
+- `encryptPdf` now preserves the document's permanent first `/ID` element
+  (ISO 32000-2 §14.4) across re-encryption and rotates only the second
+  element. Previously both elements were set to the same fresh random value on
+  every call, discarding the document's permanent identity and making the two
+  elements identical, both of which are spec violations.
+
+### Tests
+
+- Re-encrypting via `changePdfPassword` asserts that the first `/ID` element
+  is unchanged and the second element is different.
+
 ## [0.1.7] (2026-07-17)
 
 ### Changed

@@ -8,6 +8,24 @@ Implements the PDF Standard Security Handler, Version 5 / Revision 6 (AES-256), 
 
 Revision 6 was chosen over the older Revision 4 (AES-128) because R4's key derivation requires RC4 even though the content itself is AES-encrypted. R6 needs only AES-CBC and SHA-256/384/512, both already provided by [node-forge](https://github.com/digitalbazaar/forge).
 
+## Scope
+
+This is an open-source building block, not a managed solution. It is published so other developers can build on it. If you integrate it into your own project, you own that integration - review the source, run your own tests, and decide for yourself whether it fits your security requirements.
+
+## Known limitation: xref streams
+
+This library cannot decrypt PDFs that use PDF 1.5+ cross-reference streams (object streams / xref streams). Most modern PDF generators produce this format by default, including qpdf, Acrobat, and most web-based PDF tools.
+
+**Symptom:** `Error('XREF_STREAM_UNSUPPORTED: ...')` when calling `decryptPdf`.
+
+**Workaround:** pre-process the file with [qpdf](https://qpdf.readthedocs.io/):
+
+```
+qpdf --object-streams=disable input.pdf output.pdf
+```
+
+This is a limitation of [pdf-lib's parser](https://github.com/Hopding/pdf-lib), which decompresses object streams during load - before this library can supply the file key. It cannot be worked around at this layer without replacing the parser.
+
 ## Install
 
 ```

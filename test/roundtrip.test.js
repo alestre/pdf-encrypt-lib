@@ -146,6 +146,23 @@ test('decryptPdf throws CORRUPT_PDF instead of silently emptying a too-short enc
     }
 });
 
+test('/ID first element is preserved and second element is rotated on re-encryption', async () => {
+    const plain = await makeTestPdf('id rotation test');
+    const encrypted = await encryptPdf(plain, 'pass');
+
+    const doc1 = await PDFDocument.load(encrypted, { ignoreEncryption: true, updateMetadata: false });
+    const firstId1 = Buffer.from(doc1.context.trailerInfo.ID.get(0).asBytes());
+    const secondId1 = Buffer.from(doc1.context.trailerInfo.ID.get(1).asBytes());
+
+    const rotated = await changePdfPassword(encrypted, 'pass', 'new-pass');
+    const doc2 = await PDFDocument.load(rotated, { ignoreEncryption: true, updateMetadata: false });
+    const firstId2 = Buffer.from(doc2.context.trailerInfo.ID.get(0).asBytes());
+    const secondId2 = Buffer.from(doc2.context.trailerInfo.ID.get(1).asBytes());
+
+    assert.deepEqual(firstId1, firstId2, 'first /ID element must be preserved across re-encryption');
+    assert.notDeepEqual(secondId1, secondId2, 'second /ID element must be rotated on re-encryption');
+});
+
 test('changePdfPassword with options.ownerPassword sets a distinct new owner password', async () => {
     const plain = await makeTestPdf('two-password rotate test');
     const encrypted = await encryptPdf(plain, 'user-pass', { ownerPassword: 'old-owner' });
