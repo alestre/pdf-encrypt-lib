@@ -180,19 +180,28 @@ function transformLeaf(val, fn) {
     return val;
 }
 
-function walkAndTransform(pdfDoc, fn) {
-    pdfDoc.context.enumerateIndirectObjects().forEach(([, obj]) => transformPdfValue(obj, fn));
+function isMetadataStream(obj) {
+    return obj instanceof PDFStream && obj.dict.lookup(PDFName.of('Type')) === PDFName.of('Metadata');
+}
+
+function walkAndTransform(pdfDoc, fn, shouldSkip) {
+    pdfDoc.context.enumerateIndirectObjects().forEach(([ref, obj]) => {
+        if (shouldSkip && shouldSkip(ref, obj)) return;
+        transformPdfValue(obj, fn);
+    });
 }
 
 /**
  * Encrypt a PDF with AES-256.
  * @param {Uint8Array|ArrayBuffer} bytes - source PDF bytes
  * @param {string} password - the user (viewing) password
- * @param {{ ownerPassword?: string, permissions?: number }} [options] -
+ * @param {{ ownerPassword?: string, permissions?: number, encryptMetadata?: boolean }} [options] -
  *   ownerPassword defaults to `password` if not given, i.e. a single password
  *   unlocks the file with full permissions. Pass a different ownerPassword to
  *   issue a separate restricted viewing password vs. a full-access master
- *   password (see the PDF spec's user/owner password model).
+ *   password (see the PDF spec's user/owner password model). encryptMetadata
+ *   defaults to true; set to false to leave the document's /Metadata (XMP)
+ *   stream in plaintext, e.g. so indexing tools can read it without a password.
  * @returns {Promise<Uint8Array>} encrypted PDF bytes
  */
 export async function encryptPdf(bytes, password, options = {}) {
@@ -204,12 +213,13 @@ export async function encryptPdf(bytes, password, options = {}) {
     const pwdBytes = forge.util.encodeUtf8(password);
     const ownerPwdBytes = forge.util.encodeUtf8(options.ownerPassword ?? password);
     const permissions = options.permissions ?? DEFAULT_PERMISSIONS;
+    const encryptMetadata = options.encryptMetadata ?? true;
 
-    walkAndTransform(doc, (raw) => encryptObjectAESV3(fileKey, raw));
+    walkAndTransform(doc, (raw) => encryptObjectAESV3(fileKey, raw), encryptMetadata ? null : (ref, obj) => isMetadataStream(obj));
 
     const uPair = computeUandUE(pwdBytes, fileKey);
     const oPair = computeOandOE(ownerPwdBytes, uPair.U, fileKey);
-    const perms = computePerms(permissions, true, fileKey);
+    const perms = computePerms(permissions, encryptMetadata, fileKey);
 
     const cf = doc.context.obj({
         StdCF: doc.context.obj({ CFM: PDFName.of('AESV3'), AuthEvent: PDFName.of('DocOpen'), Length: PDFNumber.of(32) }),
@@ -225,7 +235,7 @@ export async function encryptPdf(bytes, password, options = {}) {
         UE: PDFHexString.of(bytesToHex(uPair.UE)),
         P: PDFNumber.of(permissions | 0),
         Perms: PDFHexString.of(bytesToHex(perms)),
-        EncryptMetadata: PDFBool.True,
+        EncryptMetadata: encryptMetadata ? PDFBool.True : PDFBool.False,
         CF: cf,
         StmF: PDFName.of('StdCF'),
         StrF: PDFName.of('StdCF'),
@@ -258,13 +268,15 @@ export async function decryptPdf(bytes, password) {
     }
     if (!encRef) throw new Error('NOT_ENCRYPTED');
 
-    let U48, O48, UE32, OE32;
+    let U48, O48, UE32, OE32, encryptMetadata;
     try {
         const encDict = doc.context.lookup(encRef);
         U48 = uint8ToBinaryString(encDict.lookup(PDFName.of('U')).asBytes());
         O48 = uint8ToBinaryString(encDict.lookup(PDFName.of('O')).asBytes());
         UE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('UE')).asBytes());
         OE32 = uint8ToBinaryString(encDict.lookup(PDFName.of('OE')).asBytes());
+        const emVal = encDict.lookup(PDFName.of('EncryptMetadata'));
+        encryptMetadata = emVal ? emVal.asBoolean() : true;
     } catch {
         throw new Error('CORRUPT_PDF');
     }
@@ -272,10 +284,7 @@ export async function decryptPdf(bytes, password) {
     const auth = authenticatePdfPassword(password, U48, O48, UE32, OE32);
     if (!auth) throw new Error('WRONG_PASSWORD');
 
-    doc.context.enumerateIndirectObjects().forEach(([ref, obj]) => {
-        if (ref === encRef) return;
-        transformPdfValue(obj, (raw) => decryptObjectAESV3(auth.fileKey, raw));
-    });
+    walkAndTransform(doc, (raw) => decryptObjectAESV3(auth.fileKey, raw), (ref, obj) => ref === encRef || (!encryptMetadata && isMetadataStream(obj)));
 
     delete doc.context.trailerInfo.Encrypt;
     return { bytes: await doc.save({ useObjectStreams: false }), owner: auth.owner };

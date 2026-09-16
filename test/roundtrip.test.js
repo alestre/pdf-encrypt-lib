@@ -13,6 +13,29 @@ async function makeTestPdf(text) {
     return doc.save();
 }
 
+async function makeTestPdfWithMetadata(text) {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([595, 842]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText(text, { x: 50, y: 780, size: 14, font });
+
+    const xmp = '<x:xmpmeta xmlns:x="adobe:ns:meta/">PLAINTEXT-METADATA-MARKER</x:xmpmeta>';
+    const metadataStream = doc.context.flateStream(xmp, { Type: 'Metadata', Subtype: 'XML' });
+    const metadataRef = doc.context.register(metadataStream);
+    doc.catalog.set(PDFName.of('Metadata'), metadataRef);
+
+    return doc.save();
+}
+
+// Loads without decrypting (ignoreEncryption) and inflates the /Metadata stream's
+// raw bytes directly - only valid deflate data (i.e. plaintext) inflates cleanly.
+async function extractMetadataStreamRaw(bytes) {
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    const metaRef = doc.catalog.get(PDFName.of('Metadata'));
+    const metaStream = doc.context.lookup(metaRef);
+    return inflateSync(Buffer.from(metaStream.contents)).toString('latin1');
+}
+
 // pdf-lib has no text-extraction API, and encodes drawn text as hex-string Tj
 // operands (`<...>` rather than `(...)`). Content streams are also
 // Flate-compressed by default. Pull the raw stream via the low-level object
@@ -93,4 +116,25 @@ test('empty string password round-trips correctly', async () => {
 test('decryptPdf throws CORRUPT_PDF on unparseable input', async () => {
     const garbage = new Uint8Array(128).fill(0x42);
     await assert.rejects(() => decryptPdf(garbage, 'any'), /CORRUPT_PDF/);
+});
+
+test('encryptMetadata:false leaves the /Metadata stream in plaintext', async () => {
+    const plain = await makeTestPdfWithMetadata('metadata test');
+    const encrypted = await encryptPdf(plain, 'pw', { encryptMetadata: false });
+
+    const metaText = await extractMetadataStreamRaw(encrypted);
+    assert.match(metaText, /PLAINTEXT-METADATA-MARKER/);
+
+    const result = await decryptPdf(encrypted, 'pw');
+    assert.match(await extractFirstPageText(result.bytes), /metadata test/);
+});
+
+test('encryptMetadata defaults to true and encrypts the /Metadata stream', async () => {
+    const plain = await makeTestPdfWithMetadata('metadata default test');
+    const encrypted = await encryptPdf(plain, 'pw');
+
+    await assert.rejects(() => extractMetadataStreamRaw(encrypted));
+
+    const result = await decryptPdf(encrypted, 'pw');
+    assert.match(await extractFirstPageText(result.bytes), /metadata default test/);
 });
