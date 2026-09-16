@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `encryptPdf` accepts `options.encryptMetadata` (default `true`). When set to
+  `false`, the document's `/Metadata` (XMP) stream is left in plaintext, per
+  ISO 32000-2, so indexing tools can read it without a password. `decryptPdf`
+  reads the flag back from the `/Encrypt` dict and skips re-decrypting an
+  already-plaintext metadata stream accordingly.
+
 ## [0.1.1] - 2026-07-17
 
 ### Fixed
