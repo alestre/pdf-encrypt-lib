@@ -4,8 +4,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { PDFDocument, StandardFonts } from 'pdf-lib';
-import { encryptPdf } from '../src/index.js';
+import { PDFDocument, StandardFonts, PDFName } from 'pdf-lib';
+import { readFile } from 'node:fs/promises';
+import { encryptPdf, decryptPdf } from '../src/index.js';
 
 // Cross-validates our AES-256 output against independent PDF readers (qpdf,
 // poppler) instead of just round-tripping through our own encrypt/decrypt -
@@ -19,6 +20,22 @@ async function makeTestPdf(text) {
     const page = doc.addPage([595, 842]);
     const font = await doc.embedFont(StandardFonts.Helvetica);
     page.drawText(text, { x: 50, y: 780, size: 14, font });
+    return doc.save();
+}
+
+const METADATA_MARKER = 'PLAINTEXT-METADATA-MARKER';
+
+async function makeTestPdfWithMetadata(text) {
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([595, 842]);
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    page.drawText(text, { x: 50, y: 780, size: 14, font });
+
+    const xmp = `<x:xmpmeta xmlns:x="adobe:ns:meta/">${METADATA_MARKER}</x:xmpmeta>`;
+    const metadataStream = doc.context.flateStream(xmp, { Type: 'Metadata', Subtype: 'XML' });
+    const metadataRef = doc.context.register(metadataStream);
+    doc.catalog.set(PDFName.of('Metadata'), metadataRef);
+
     return doc.save();
 }
 
@@ -79,10 +96,70 @@ test(
 );
 
 test(
+    'qpdf-encrypted PDF is decrypted correctly by our library',
+    { skip: qpdfAvailable ? false : 'qpdf not found on this machine' },
+    () => withTempEncryptedPdf(async (_encPath, dir) => {
+        const plainPath = path.join(dir, 'plain.pdf');
+        const qpdfEncPath = path.join(dir, 'qpdf-enc.pdf');
+        const plainBytes = await makeTestPdf(CONTENT);
+        await writeFile(plainPath, plainBytes);
+        // --object-streams=disable forces a traditional xref table; pdf-lib cannot
+        // load encrypted PDFs that use xref streams (a pdf-lib parser limitation).
+        execFileSync('qpdf', ['--object-streams=disable', '--encrypt', PASSWORD, PASSWORD, '256', '--', plainPath, qpdfEncPath]);
+        const encrypted = await readFile(qpdfEncPath);
+        const result = await decryptPdf(encrypted, PASSWORD);
+        assert.ok(result.bytes.length > 0);
+    })
+);
+
+test(
+    'decryptPdf rejects a qpdf-encrypted PDF that uses xref/object streams with a clear error',
+    { skip: qpdfAvailable ? false : 'qpdf not found on this machine' },
+    () => withTempEncryptedPdf(async (_encPath, dir) => {
+        const plainPath = path.join(dir, 'plain.pdf');
+        const qpdfEncPath = path.join(dir, 'qpdf-enc.pdf');
+        await writeFile(plainPath, await makeTestPdf(CONTENT));
+        // no --object-streams=disable this time - qpdf's default (xref stream + ObjStm)
+        execFileSync('qpdf', ['--encrypt', PASSWORD, PASSWORD, '256', '--', plainPath, qpdfEncPath]);
+        const encrypted = await readFile(qpdfEncPath);
+        await assert.rejects(() => decryptPdf(encrypted, PASSWORD), /XREF_STREAM_UNSUPPORTED/);
+    })
+);
+
+test(
     'poppler (native or WSL) extracts the original text with the correct password',
     { skip: popplerMode ? false : 'poppler not found natively or via WSL on this machine' },
     () => withTempEncryptedPdf(async (encPath) => {
         const text = pdftotext(encPath, PASSWORD);
         assert.match(text, /Interop test content\./);
     })
+);
+
+test(
+    'qpdf confirms encryptMetadata:false leaves the /Metadata stream readable, not corrupted by AES',
+    { skip: qpdfAvailable ? false : 'qpdf not found on this machine' },
+    async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), 'pdf-interop-'));
+        try {
+            const encPath = path.join(dir, 'enc.pdf');
+            const decPath = path.join(dir, 'dec.pdf');
+            const encrypted = await encryptPdf(await makeTestPdfWithMetadata(CONTENT), PASSWORD, { encryptMetadata: false });
+            await writeFile(encPath, encrypted);
+
+            // qpdf is a spec-compliant reader independent of this library: it
+            // decides on its own, from the /Encrypt dict's EncryptMetadata flag,
+            // whether to AES-decrypt the /Metadata stream. If our flag or our
+            // skip-logic were wrong, qpdf would either fail to produce readable
+            // XMP text here (it tried to AES-decrypt already-plaintext bytes) or
+            // this whole decrypt would misbehave.
+            execFileSync('qpdf', [`--password=${PASSWORD}`, '--decrypt', encPath, decPath]);
+
+            const doc = await PDFDocument.load(await readFile(decPath));
+            const metaStream = doc.context.lookup(doc.catalog.get(PDFName.of('Metadata')));
+            const text = Buffer.from(metaStream.contents).toString('latin1');
+            assert.match(text, new RegExp(METADATA_MARKER));
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    }
 );
