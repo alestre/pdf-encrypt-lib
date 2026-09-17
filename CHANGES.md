@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.1.9] (2026-09-17)
 
 ### Added
 
@@ -13,6 +13,15 @@ All notable changes to this project will be documented in this file.
   already-plaintext metadata stream accordingly. `changePdfPassword` preserves
   the original document's `encryptMetadata` choice across rotation, same as it
   already does for `permissions`.
+
+### Tests
+
+- `encryptMetadata:false` leaves the `/Metadata` stream in plaintext; defaults
+  to `true` and encrypts it otherwise.
+- `changePdfPassword` preserves `encryptMetadata:false` across rotation.
+- Interop: qpdf (an independent AES-256 implementation) confirms the
+  `/Metadata` stream is readable and not corrupted by AES when
+  `encryptMetadata:false` is used.
 
 ## [0.1.8] (2026-07-17)
 
