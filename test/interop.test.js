@@ -163,3 +163,31 @@ test(
         }
     }
 );
+
+test(
+    'qpdf reads the XMP generated from an Info-only PDF and still decrypts the Info dictionary',
+    { skip: qpdfAvailable ? false : 'qpdf not found on this machine' },
+    async () => {
+        const dir = await mkdtemp(path.join(tmpdir(), 'pdf-interop-'));
+        try {
+            const doc = await PDFDocument.create();
+            doc.setTitle('Interop Title & Co');
+            doc.setAuthor('Interop Author');
+            doc.addPage([200, 200]);
+            const encPath = path.join(dir, 'enc.pdf');
+            const decPath = path.join(dir, 'dec.pdf');
+            await writeFile(encPath, await encryptPdf(await doc.save(), PASSWORD, { encryptMetadata: false }));
+
+            // qpdf must accept the file and decrypt every other object normally.
+            execFileSync('qpdf', [`--password=${PASSWORD}`, '--decrypt', encPath, decPath]);
+
+            const out = await PDFDocument.load(await readFile(decPath), { updateMetadata: false });
+            assert.equal(out.getTitle(), 'Interop Title & Co');
+            assert.equal(out.getAuthor(), 'Interop Author');
+            const xmp = Buffer.from(out.context.lookup(out.catalog.get(PDFName.of('Metadata'))).contents).toString('utf8');
+            assert.match(xmp, /Interop Title &amp; Co/);
+        } finally {
+            await rm(dir, { recursive: true, force: true });
+        }
+    }
+);

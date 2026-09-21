@@ -36,6 +36,26 @@ async function extractMetadataStreamRaw(bytes) {
     return inflateSync(Buffer.from(metaStream.contents)).toString('latin1');
 }
 
+// Info-dictionary-only PDF (no XMP), the shape pdf-lib's setTitle()/setAuthor() produce.
+async function makeInfoOnlyPdf(info) {
+    const doc = await PDFDocument.create();
+    doc.setTitle(info.title);
+    doc.setAuthor(info.author);
+    if (info.subject) doc.setSubject(info.subject);
+    if (info.keywords) doc.setKeywords(info.keywords);
+    doc.addPage([200, 200]);
+    return doc.save();
+}
+
+// Reads the /Metadata stream bytes as UTF-8 without decrypting; returns null if absent.
+// Generated XMP is stored uncompressed, so no inflate here.
+async function readXmpUnencrypted(bytes) {
+    const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+    const ref = doc.catalog.get(PDFName.of('Metadata'));
+    if (!ref) return null;
+    return Buffer.from(doc.context.lookup(ref).contents).toString('utf8');
+}
+
 // pdf-lib has no text-extraction API, and encodes drawn text as hex-string Tj
 // operands (`<...>` rather than `(...)`). Content streams are also
 // Flate-compressed by default. Pull the raw stream via the low-level object
@@ -251,4 +271,47 @@ test('changePdfPassword preserves encryptMetadata:false across rotation', async 
     const result = await decryptPdf(rotated, 'new-pass');
     assert.equal(result.encryptMetadata, false);
     assert.match(await extractFirstPageText(result.bytes), /metadata rotate test/);
+});
+
+test('encryptMetadata:false generates a plaintext XMP from the Info dictionary when the PDF has none', async () => {
+    const plain = await makeInfoOnlyPdf({ title: 'Quarterly Report', author: 'Jane Doe', subject: 'Finance', keywords: ['q3', 'budget'] });
+    const encrypted = await encryptPdf(plain, 'pw', { encryptMetadata: false });
+
+    const xmp = await readXmpUnencrypted(encrypted);
+    assert.ok(xmp, 'expected a /Metadata stream to be generated');
+    assert.match(xmp, /Quarterly Report/);
+    assert.match(xmp, /Jane Doe/);
+    assert.match(xmp, /Finance/);
+    assert.match(xmp, /q3 budget/);
+
+    const result = await decryptPdf(encrypted, 'pw');
+    assert.equal(result.encryptMetadata, false);
+});
+
+test('generated XMP escapes XML special characters and keeps non-ASCII text', async () => {
+    const plain = await makeInfoOnlyPdf({ title: 'Tom & Jerry <"draft">', author: 'Zoë Müller' });
+    const encrypted = await encryptPdf(plain, 'pw', { encryptMetadata: false });
+
+    const xmp = await readXmpUnencrypted(encrypted);
+    assert.match(xmp, /Tom &amp; Jerry &lt;&quot;draft&quot;&gt;/);
+    assert.match(xmp, /Zoë Müller/);
+    assert.doesNotMatch(xmp, /Tom & Jerry/);
+});
+
+test('encryptMetadata:false does not overwrite an existing XMP stream', async () => {
+    const plain = await makeTestPdfWithMetadata('existing xmp');
+    const encrypted = await encryptPdf(plain, 'pw', { encryptMetadata: false });
+    assert.match(await extractMetadataStreamRaw(encrypted), /PLAINTEXT-METADATA-MARKER/);
+});
+
+test('no XMP is generated when encryptMetadata is true or the Info dictionary carries no fields', async () => {
+    const withInfo = await makeInfoOnlyPdf({ title: 'Secret Title', author: 'Secret Author' });
+    assert.equal(await readXmpUnencrypted(await encryptPdf(withInfo, 'pw')), null);
+
+    const doc = await PDFDocument.create();
+    doc.setProducer('');
+    doc.setCreator('');
+    doc.addPage([200, 200]);
+    const empty = await doc.save();
+    assert.equal(await readXmpUnencrypted(await encryptPdf(empty, 'pw', { encryptMetadata: false })), null);
 });
