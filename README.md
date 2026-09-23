@@ -93,6 +93,8 @@ await encryptPdf(bytes, 'password', { encryptMetadata: false });
 
 `encryptMetadata` defaults to `true`. Set it to `false` to leave the document's `/Metadata` (XMP) stream in plaintext, e.g. so indexing tools can read title/author/keywords without a password, while the rest of the document (page content, other strings) stays encrypted as usual. `changePdfPassword` preserves the original document's choice across a rotation unless overridden via `options.encryptMetadata`.
 
+The spec only exempts the XMP stream: the classic Info dictionary (what pdf-lib's `setTitle()`/`setAuthor()` write) is made of ordinary strings and always stays encrypted. So that the option is useful for such PDFs too, `encryptPdf` copies the Info dictionary's title, author, subject and keywords into a minimal, unencrypted XMP stream when `encryptMetadata` is `false` and the PDF has no `/Metadata` stream yet. An existing XMP stream is never modified. The Info dictionary itself stays encrypted.
+
 ## API
 
 - `encryptPdf(bytes, password, options?) -> Promise<Uint8Array>`

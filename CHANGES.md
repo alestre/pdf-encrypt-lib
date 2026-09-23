@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.10] (2026-09-21)
+
+### Added
+
+- With `encryptMetadata: false`, `encryptPdf` now generates a minimal
+  unencrypted XMP stream from the Info dictionary (title, author, subject,
+  keywords) when the PDF has no `/Metadata` stream of its own. Previously the
+  option only exempted an existing XMP stream, so PDFs that carry their
+  metadata solely in the Info dictionary (e.g. anything written with pdf-lib's
+  `setTitle()`) got no readable metadata at all, because Info entries are
+  ordinary strings and stay encrypted per the spec. An existing XMP stream is
+  left untouched; the Info dictionary itself remains encrypted.
+
+### Tests
+
+- Generated XMP contains the Info fields, escapes XML special characters and
+  keeps non-ASCII text; it is not generated when `encryptMetadata` is true,
+  when the Info dictionary has no fields, or when an XMP stream already exists.
+- Interop: qpdf decrypts such a file and the Info dictionary and generated XMP
+  both come out intact.
+
 ## [0.1.9] (2026-09-17)
 
 ### Added

@@ -241,6 +241,30 @@ function transformLeaf(val, fn) {
     return val;
 }
 
+function xmlEscape(s) {
+    return s.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Minimal XMP packet carrying the Info dictionary's text fields. Only used when
+// encryptMetadata is false and the PDF has no /Metadata stream of its own: Info
+// entries are ordinary strings, which the spec keeps encrypted regardless of
+// EncryptMetadata, so without an XMP copy nothing would be readable unencrypted.
+function buildXmpFromInfo(doc) {
+    const fields = [];
+    const title = doc.getTitle(), author = doc.getAuthor(), subject = doc.getSubject(), keywords = doc.getKeywords();
+    if (title) fields.push(`<dc:title><rdf:Alt><rdf:li xml:lang="x-default">${xmlEscape(title)}</rdf:li></rdf:Alt></dc:title>`);
+    if (author) fields.push(`<dc:creator><rdf:Seq><rdf:li>${xmlEscape(author)}</rdf:li></rdf:Seq></dc:creator>`);
+    if (subject) fields.push(`<dc:description><rdf:Alt><rdf:li xml:lang="x-default">${xmlEscape(subject)}</rdf:li></rdf:Alt></dc:description>`);
+    if (keywords) fields.push(`<pdf:Keywords>${xmlEscape(keywords)}</pdf:Keywords>`);
+    if (!fields.length) return null;
+    return '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>' +
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">' +
+        '<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:pdf="http://ns.adobe.com/pdf/1.3/">' +
+        fields.join('') +
+        '</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end="w"?>';
+}
+
 function isMetadataStream(obj) {
     return obj instanceof PDFStream && obj.dict.lookup(PDFName.of('Type')) === PDFName.of('Metadata');
 }
@@ -275,6 +299,14 @@ export async function encryptPdf(bytes, password, options = {}) {
     const ownerPwdBytes = preparePassword(options.ownerPassword ?? password);
     const permissions = options.permissions ?? DEFAULT_PERMISSIONS;
     const encryptMetadata = options.encryptMetadata ?? true;
+
+    if (!encryptMetadata && !doc.catalog.get(PDFName.of('Metadata'))) {
+        const xmp = buildXmpFromInfo(doc);
+        if (xmp) {
+            const stream = doc.context.stream(new TextEncoder().encode(xmp), { Type: 'Metadata', Subtype: 'XML' });
+            doc.catalog.set(PDFName.of('Metadata'), doc.context.register(stream));
+        }
+    }
 
     // Invariant: encryptDict below must be built and registered *after* this walk -
     // walkAndTransform encrypts every indirect object it finds, and encryptDict
