@@ -160,6 +160,47 @@ test('SASLprep-normalizes the password, so NFC and NFD forms of the same passwor
     assert.match(await extractFirstPageText(result.bytes), /saslprep test/);
 });
 
+test('SASLprep bidi rules: an all-RandALCat password round-trips', async () => {
+    const plain = await makeTestPdf('bidi ok test');
+    const hebrew = 'שלום';
+    const encrypted = await encryptPdf(plain, hebrew);
+    const result = await decryptPdf(encrypted, hebrew);
+    assert.match(await extractFirstPageText(result.bytes), /bidi ok test/);
+});
+
+test('SASLprep bidi rules: mixing RandALCat and LCat throws INVALID_PASSWORD', async () => {
+    const plain = await makeTestPdf('bidi mixed test');
+    await assert.rejects(() => encryptPdf(plain, 'abcשלום'), /INVALID_PASSWORD/);
+});
+
+test('SASLprep bidi rules: RandALCat must be first and last character', async () => {
+    const plain = await makeTestPdf('bidi edge test');
+    await assert.rejects(() => encryptPdf(plain, 'שלום1'), /INVALID_PASSWORD/);
+});
+
+test('SASLprep prohibits control characters and maps non-ASCII spaces and soft hyphens', async () => {
+    const plain = await makeTestPdf('prohibit map test');
+    await assert.rejects(() => encryptPdf(plain, 'a\u0007b'), /INVALID_PASSWORD/);
+
+    const encrypted = await encryptPdf(plain, 'a b');
+    const result = await decryptPdf(encrypted, 'a b­');
+    assert.match(await extractFirstPageText(result.bytes), /prohibit map test/);
+});
+
+test('a non-empty password that SASLprep maps to nothing is rejected, not silently emptied', async () => {
+    const plain = await makeTestPdf('maps to nothing test');
+    await assert.rejects(() => encryptPdf(plain, '­'), /INVALID_PASSWORD/);
+});
+
+test('src has no saslprep or fs import, so the library loads in a browser bundle', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const dir = new URL('../src/', import.meta.url);
+    for (const name of await readdir(dir)) {
+        const source = await readFile(new URL(name, dir), 'utf8');
+        assert.doesNotMatch(source, /from\s+['"](saslprep|fs|node:fs|path|node:path)['"]/, name);
+    }
+});
+
 test('only the first 127 UTF-8 bytes of a password are significant', async () => {
     const plain = await makeTestPdf('long password test');
     const base = 'x'.repeat(127);
