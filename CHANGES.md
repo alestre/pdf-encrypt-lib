@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- The library now loads in browser bundles. The `saslprep` package reads its
+  code point tables with `fs.readFileSync` at import time, which crashed the
+  whole page in a browser. It is replaced by `src/saslprep.js` and
+  `src/saslprep-tables.js`: a plain-JS SASLprep (RFC 4013) with the full RFC 3454
+  bidi check and no `fs` or `path` usage. The `saslprep` dependency is removed.
+  Results are identical to the old package for every Unicode code point (checked
+  exhaustively, alone and embedded in ASCII and Hebrew context), so existing
+  encrypted files still open with the same passwords in Node and in the browser.
+
+### Tests
+
+- Bidi rules (RandALCat only, RandALCat mixed with LCat, RandALCat not at both
+  ends), prohibited characters, space and soft hyphen mapping, a password that
+  maps to nothing is rejected, and `src` contains no `saslprep`, `fs` or `path`
+  import.
+
 ## [0.1.10] (2026-09-21)
 
 ### Added
