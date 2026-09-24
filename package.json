@@ -34,8 +34,5 @@
   },
   "engines": {
     "node": ">=19"
-  },
-  "dependencies": {
-    "saslprep": "^1.0.3"
   }
 }

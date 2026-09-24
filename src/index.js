@@ -8,7 +8,7 @@
 // both provided by node-forge.
 
 import forge from 'node-forge';
-import saslprep from 'saslprep';
+import saslprep from './saslprep.js';
 import { PDFDocument, PDFName, PDFHexString, PDFNumber, PDFBool, PDFDict, PDFStream, PDFRawStream, PDFString, PDFArray } from 'pdf-lib';
 
 function randomBytes(n) {
@@ -50,12 +50,13 @@ function bytesToHex(bin) {
 function preparePassword(password) {
     let prepped;
     try {
-        // allowUnassigned: RFC 3454's "unassigned code points" table is frozen at
-        // Unicode 3.2 (2002) - without this, any modern character absent from that
-        // table (most emoji, many newer scripts) is rejected as "unassigned" even
-        // though it's perfectly valid Unicode today. Mapping, NFKC normalization,
-        // the prohibited-character list, and the bidi check all still apply.
-        prepped = saslprep(password, { allowUnassigned: true });
+        // Unassigned code points are always allowed: RFC 3454's "unassigned code
+        // points" table is frozen at Unicode 3.2 (2002) - rejecting them would
+        // refuse any modern character absent from that table (most emoji, many
+        // newer scripts) even though it's perfectly valid Unicode today. Mapping,
+        // NFKC normalization, the prohibited-character list, and the bidi check
+        // all still apply.
+        prepped = saslprep(password);
     } catch (err) {
         throw new Error(`INVALID_PASSWORD: ${err.message}`);
     }
